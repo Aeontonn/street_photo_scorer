@@ -51,6 +51,7 @@ def train_and_evaluate(embeddings: np.ndarray, df: pd.DataFrame) -> dict:
 
     print(f"\nBest model: {best_name}")
     joblib.dump(best_model, MODELS_DIR / "scorer.pkl")
+    np.save(MODELS_DIR / "score_range.npy", np.array([y.min(), y.max()]))
     return results
 
 

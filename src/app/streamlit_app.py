@@ -42,8 +42,11 @@ if uploaded:
         embedding = feats.cpu().numpy()
 
         raw_score = scorer.predict(embedding)[0]
-        # Map from log-score space to 0-10
-        aesthetic_score = float(np.clip((raw_score / 10) * 10, 0, 10))
+        score_range = np.load(MODELS_DIR / "score_range.npy")
+        aesthetic_score = float(np.clip(
+            (raw_score - score_range[0]) / (score_range[1] - score_range[0]) * 10,
+            0, 10
+        ))
 
     st.metric("Aesthetic Score", f"{aesthetic_score:.1f} / 10")
     st.progress(aesthetic_score / 10)

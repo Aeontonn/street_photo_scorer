@@ -43,13 +43,12 @@ def run():
     with open(PROCESSED_DIR / "posts_filtered.json") as f:
         posts = json.load(f)
 
-    reduced_2d, labels = reduce_and_cluster(embeddings, n_clusters=8)
-    reduced_3d, _ = reduce_and_cluster(embeddings, umap_dims=3)
+    reduced_3d, labels = reduce_and_cluster(embeddings, n_clusters=8, umap_dims=3)
 
     df = pd.DataFrame(posts)
     df["cluster"] = labels
-    df["umap_x"] = reduced_2d[:, 0]
-    df["umap_y"] = reduced_2d[:, 1]
+    df["umap_x"] = reduced_3d[:, 0]
+    df["umap_y"] = reduced_3d[:, 1]
     df["umap_z"] = reduced_3d[:, 2]
 
     df.to_csv(PROCESSED_DIR / "clustered.csv", index=False)

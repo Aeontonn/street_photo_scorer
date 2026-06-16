@@ -38,6 +38,8 @@ def extract_embeddings(posts: list[dict]) -> tuple[np.ndarray, list[dict]]:
         inputs = processor(images=images, return_tensors="pt", padding=True).to(device)
         with torch.no_grad():
             feats = model.get_image_features(**inputs)
+            if not isinstance(feats, torch.Tensor):
+                feats = feats.pooler_output
             feats = feats / feats.norm(dim=-1, keepdim=True)
         embeddings.append(feats.cpu().numpy())
 
