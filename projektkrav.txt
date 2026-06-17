@@ -1,0 +1,73 @@
+Här är en sammanfattning av allt du behöver för det stora individuella projektet:
+
+---
+
+STORT INDIVIDUELLT PROJEKT – CHECKLISTA
+
+SYFTE
+Demonstrera att du behärskar hela ML-pipeline från rådata till färdig modell. Projektet används som portfoliobit på jobbintervjuer.
+
+---
+
+OBLIGATORISKA DELAR
+
+1. DATAFÖRBEREDELSE
+- Välj ett eget dataset (se datakällor nedan)
+- Hantera saknade värden
+- Hantera kategoriska variabler (encoding)
+- Skapa ett analysklart dataset
+
+2. EDA (EXPLORATORY DATA ANALYSIS)
+- Visualiseringar för att förstå datan
+- Statistiska metoder för att identifiera mönster
+- Identifiera viktiga variabler/features
+
+3. UNSUPERVISED LEARNING
+- Använd klustring eller dimensionsreduktion för att förstå datan eller generera hypoteser
+- Exempel: K-Means, DBSCAN, PCA, UMAP
+
+4. MODELLERING (SUPERVISED LEARNING)
+- Identifiera problemet (klassificering? regression?)
+- Finns det en målvariabel? Om inte, skapa en med unsupervised learning
+- Träna minst en algoritm (OBS: INTE bara linjär/multipel linjär regression)
+- Exempel på godkända algoritmer: Random Forest, SVM, XGBoost, neuralt nätverk, CNN, RNN, etc.
+- Du får använda PCA/UMAP för att minska dimensioner om datorn kör långsamt
+- Du FÅR använda deep learning (strukturerad data, bilder, text, ljud)
+
+5. UTVÄRDERING
+- Confusion Matrix
+- Classification Report (precision, recall, F1)
+- AUC-ROC
+- Precision-Recall-kurva
+
+---
+
+EXTRA (FRIVILLIGT MEN MERITERANDE)
+
+- Interaktiva visualiseringar / dashboards
+- Model deployment med Streamlit, Dash eller React.js + Flask
+- Om Streamlit: app.py, requirements.txt, Procfile, .python-version
+- Om React + Flask: frontend i Vite/React, backend i Flask med /predict-endpoint, CORS aktiverat
+
+---
+
+DATAKÄLLOR ATT VÄLJA FRÅN
+- Kaggle (kaggle.com)
+- UCI Machine Learning Repository
+- Google Dataset Search
+- AWS Open Data Registry
+- Data.gov
+- Quandl (finansiell/ekonomisk data)
+- Google BigQuery Public Datasets
+- OpenML
+- DrivenData
+- Zenodo
+- Universitetsrepon (MIT, Harvard, Stanford)
+
+---
+
+TIPS INFÖR JOBBINTERVJUER
+- Välj ett dataset du faktiskt tycker är intressant
+- Sikta på att använda mer avancerade tekniker du kan förklara
+- Dokumentera varje beslut du tar (varför valde du den algoritmen? varför den preprocessingen?)
+- Lägg projektet på GitHub med en tydlig README
