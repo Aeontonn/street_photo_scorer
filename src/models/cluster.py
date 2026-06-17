@@ -52,7 +52,6 @@ def run():
     df["umap_z"] = reduced_3d[:, 2]
 
     df.to_csv(PROCESSED_DIR / "clustered.csv", index=False)
-    np.save(PROCESSED_DIR / "umap_2d.npy", reduced_2d)
     np.save(PROCESSED_DIR / "umap_3d.npy", reduced_3d)
     print(f"Clusters: {df['cluster'].value_counts().to_dict()}")
 
