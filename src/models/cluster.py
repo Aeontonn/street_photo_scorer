@@ -1,41 +1,19 @@
-"""Unsupervised clustering: UMAP dimensionality reduction + KMeans/HDBSCAN."""
+"""Unsupervised clustering: UMAP dimensionality reduction + KMeans."""
 
 import json
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import umap
 from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
-
-try:
-    import hdbscan
-    HAS_HDBSCAN = True
-except ImportError:
-    HAS_HDBSCAN = False
 
 PROCESSED_DIR = Path("data/processed")
+MODELS_DIR = Path("data/models")
+MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-
-def reduce_and_cluster(
-    embeddings: np.ndarray,
-    n_clusters: int = 8,
-    umap_dims: int = 2,
-    use_hdbscan: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return (umap_2d, cluster_labels)."""
-    reducer = umap.UMAP(n_components=umap_dims, random_state=42, n_neighbors=15, min_dist=0.1)
-    reduced = reducer.fit_transform(embeddings)
-
-    if use_hdbscan and HAS_HDBSCAN:
-        clusterer = hdbscan.HDBSCAN(min_cluster_size=30, min_samples=5)
-        labels = clusterer.fit_predict(reduced)
-    else:
-        clusterer = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
-        labels = clusterer.fit_predict(reduced)
-
-    return reduced, labels
+N_CLUSTERS = 8
 
 
 def run():
@@ -43,7 +21,13 @@ def run():
     with open(PROCESSED_DIR / "posts_filtered.json") as f:
         posts = json.load(f)
 
-    reduced_3d, labels = reduce_and_cluster(embeddings, n_clusters=8, umap_dims=3)
+    print("Fitting UMAP (3D)...")
+    reducer = umap.UMAP(n_components=3, random_state=42, n_neighbors=15, min_dist=0.1)
+    reduced_3d = reducer.fit_transform(embeddings)
+
+    print("Fitting KMeans...")
+    kmeans = KMeans(n_clusters=N_CLUSTERS, random_state=42, n_init="auto")
+    labels = kmeans.fit_predict(reduced_3d)
 
     df = pd.DataFrame(posts)
     df["cluster"] = labels
@@ -53,7 +37,14 @@ def run():
 
     df.to_csv(PROCESSED_DIR / "clustered.csv", index=False)
     np.save(PROCESSED_DIR / "umap_3d.npy", reduced_3d)
-    print(f"Clusters: {df['cluster'].value_counts().to_dict()}")
+    np.save(PROCESSED_DIR / "embeddings.npy", embeddings)
+
+    # Save models so the app can project new images
+    joblib.dump(reducer, MODELS_DIR / "umap_reducer.pkl")
+    joblib.dump(kmeans, MODELS_DIR / "kmeans.pkl")
+
+    print(f"Clusters: {df['cluster'].value_counts().sort_index().to_dict()}")
+    print(f"Saved umap_reducer.pkl and kmeans.pkl to {MODELS_DIR}")
 
 
 if __name__ == "__main__":
