@@ -7,6 +7,7 @@
 **Problemformulering:** Kan en maskininlärningsmodell lära sig vad som gör ett gatufoto estetiskt tilltalande, baserat på communityns upvotes som proxy för kvalitet?
 
 **Pipeline:**
+
 1. Scraping av 22 374 bilder + metadata från r/streetphotography via Arctic Shift
 2. Feature-extraktion med CLIP ViT-B/32 (OpenAI) → 512-dimensionella embeddings per bild
 3. Unsupervised klustring: UMAP (dimensionsreduktion, 512D → 3D) + KMeans (8 stilkluster)
@@ -21,28 +22,33 @@
 **Datakälla:** r/streetphotography via Arctic Shift-arkivet (ingen API-nyckel krävs, alla Reddit-poster är publik historik)
 
 **Insamlat:**
-- 22 374 bilder laddades ner (ca 2,3 GB bilder totalt)
-- Scraping gick bakåt i tid från 2024 till ca 2020
+
+- 22 375 posts hämtades via Arctic Shift API, 22 374 bilder laddades ner
+- Tidsperiod: juli 2020 – december 2023
 - Metadata per post: score (upvotes), upvote_ratio, num_comments, created_utc, author
 
 **Target-variabel:** `log1p(score)` — log-transformerade upvotes
-- Motivering: score-fördelningen följer en power-law. Log-transform gör distributionen mer normalliknande och stabiliserar träningen.
-- Score-range: log1p(0) = 0 till log1p(>10 000) ≈ 9.2
+
+- Motivering: score-fördelningen följer en power-law (median 6 upvotes, medelvärde 56.7 — ett fåtal posts drar upp snittet kraftigt). Log-transform gör distributionen mer normalliknande och stabiliserar träningen.
+- Score-range i rådata: 0 – 3 267 upvotes
+- log1p-range: 0.0 – 8.09
 
 **Bortfallsanalys:**
-- Bilder som inte längre var tillgängliga (raderade posts, utgångna Imgur-länkar) hoppades automatiskt över
-- Korrumperade PNG-filer hanterades via try/except i embedding-steget
-- Nyare posts (2024) hade något högre bortfall — bilder raderas fortare än metadata
+
+- 22 375 posts hämtades, 22 374 bilder laddades ner framgångsrikt (minimalt bortfall)
+- Enstaka korrumperade PNG-filer hanterades via try/except i embedding-steget och hoppades över
+- Arctic Shift-arkivet innehåller alla publika Reddit-poster oavsett om originalet är raderat, vilket minimerar bortfall jämfört med att scrapa Reddit direkt
 
 ---
 
 ## 3. EDA (Exploratory Data Analysis)
 
 **Viktiga observationer:**
-- Score-distribution är kraftigt högersneddad (power-law): medianen är ca 15–20 upvotes men medelvärdet är mycket högre pga outliers
+
+- Score-distribution är kraftigt högersneddad (power-law): median 6 upvotes, medelvärde 56.7 — ett litet antal virala poster drar upp snittet kraftigt
 - log1p(score) ser mer normalfördelad ut → motiverar valet av target
 - Positiv korrelation score ↔ num_comments men inte perfekt
-- Kluster med människor i bild har konsekvent högre median-score än kluster med ren arkitektur eller landskap
+- Kluster med människor i bild har konsekvent högre medel-score än kluster med ren arkitektur eller landskap
 
 **Subreddit-kontext:** r/streetphotography har >500k subscribers och en specifik smakprofil. Resultaten är inte generaliserbara till all fotografi.
 
@@ -51,6 +57,7 @@
 ## 4. Feature-extraktion — CLIP
 
 **Modell:** CLIP ViT-B/32 (OpenAI, via HuggingFace Transformers)
+
 - Tränad på 400 miljoner bild-text-par
 - Extraherar 512-dimensionella embeddings som kodifierar semantiskt och visuellt innehåll
 - Embeddingarna fångar: motiv, komposition, ljussättning, stil, färgpalett, genre
@@ -66,25 +73,26 @@
 ## 5. Unsupervised Learning — Klustring
 
 **Pipeline:**
+
 1. UMAP: 512D → 3D (n_neighbors=15, min_dist=0.1, metric='cosine')
 2. KMeans: 8 kluster (experimenterat med 6–12)
 
-**Klusterresultat:**
+**Klusterresultat (22 374 foton, 8 kluster):**
 
-| Kluster | Stil | Medel-score |
-|---------|------|-------------|
-| 0 | Style group A | 59.6 |
-| 3 | Style group B | 55.0 |
-| 2 | Style group C | 52.9 |
-| 7 | Style group D | 50.4 |
-| 5 | Style group E | 47.4 |
-| 6 | Style group F | 36.7 |
-| 4 | Style group G | 35.9 |
-| 1 | Style group H | 35.8 |
+| Kluster | n foton | Medel-score (upvotes) |
+| ------- | ------- | --------------------- |
+| 4       | 1 891   | 75.8                  |
+| 6       | 3 005   | 67.4                  |
+| 0       | 2 300   | 56.5                  |
+| 2       | 2 910   | 54.4                  |
+| 1       | 1 520   | 54.1                  |
+| 5       | 2 477   | 54.0                  |
+| 3       | 5 027   | 51.1                  |
+| 7       | 3 244   | 49.6                  |
 
-*(Klusternamnen kan fyllas i efter inspektion av notebook 02)*
+_(Klusternamnen fylls i efter inspektion av notebook 02)_
 
-**Viktig observation:** Kluster 0 och 3 har nästan dubbelt så högt medel-score som kluster 1 och 4. Det finns alltså tydliga visuella stilar som premieras av communityn — empiriskt observerat är det framförallt candid-porträtt och stark svartvit-estetik.
+**Viktig observation:** Kluster 4 och 6 har ca 50% högre medel-score än kluster 3 och 7. Det finns alltså tydliga visuella stilar som premieras av communityn. Kluster 3 är också störst (5 027 foton) vilket tyder på att det fångar en "genomsnittlig" Reddit-stil med lägre engagement.
 
 **Diskussion:** UMAP är icke-linjär och bevarar lokal struktur bättre än PCA. KMeans antar sfäriska kluster — HDBSCAN är ett alternativ som hittar godtyckliga former och hanterar brus.
 
@@ -95,42 +103,51 @@
 ## 6. Supervised Learning — Scoring-modell
 
 **Modeller tränade (regression, target: log1p(score)):**
+
 - Ridge Regression (linjär, regulariserad, Pipeline med StandardScaler)
 - Random Forest (200 träd, n_jobs=-1)
 - Gradient Boosting (100 estimators, learning_rate=0.1, subsample=0.8)
 
-**Bästa modell:** Ridge Regression (sparad som scorer.pkl, i Pipeline med StandardScaler)
+**Bästa regressionsmodell:** Ridge Regression (sparad som scorer.pkl, Pipeline med StandardScaler)
 
-**Utvärdering:**
-- R² ≈ 0.10–0.15 (förväntat lågt för subjektiv estetik)
-- MAE — medelabsolutfel i log1p-enheter
+**Faktiska utvärderingsvärden (testset, 80/20-split):**
 
-**Binär klassificering (hög/låg kvalitet = över/under median log-score):**
-- Logistic Regression (bäst AUC-ROC, Pipeline med StandardScaler)
-- Random Forest (n_jobs=-1)
-- Gradient Boosting
+- R² = 0.104
+- MAE = 1.17 log1p-enheter
 
-**Bästa klassifierare:** Logistic Regression (AUC-ROC ≈ 0.66)
+**Binär klassificering (hög/låg kvalitet = över/under median log-score ≈ 5 upvotes):**
 
-**Varför lågt R² och AUC?**
+- Logistic Regression (Pipeline med StandardScaler)
+- Random Forest (200 träd, n_jobs=-1)
+- Gradient Boosting (100 estimators)
+
+**Bästa klassifierare:** Logistic Regression
+
+**Faktiskt AUC-ROC = 0.50** — i praktiken samma som att gissa slumpmässigt. Det är ett viktigt resultat: binär klassificering av "hög vs låg kvalitet" baserat enbart på visuella CLIP-embeddings fungerar inte bättre än slump.
+
+**Varför så dåliga resultat?**
+
 - Upvotes påverkas av faktorer utanför bilden: tidpunkt för publicering, author-popularitet, trending topics, titeln på posten
 - Estetik är subjektivt — CLIP fångar visuellt innehåll men inte social kontext
-- Modellen lär sig genomsnittlig community-smak, inte individuell estetik
+- Klassificeringsgränsen (median = 5 upvotes) delar datasetet vid ett mycket lågt värde, vilket gör att brus i upvote-räkning dominerar
+- R² = 0.10 är ändå meningsfullt — det visar att visuell stil har _viss_ förutsägbarhet, men att den sociala kontexten är avgörande
 
 **Score-normalisering:**
-Percentilbaserad normalisering: score = "bättre än X% av de 22 374 träningsbilderna". Det ger en mer intuitiv och rättvis skala än linjär normalisering (som gav systematiskt låga scores pga snedfördelning).
+Percentilbaserad normalisering: score = "bättre än X% av de 22 374 träningsbilderna". Det ger en mer intuitiv och rättvis skala än linjär normalisering (som gav systematiskt låga scores pga power-law-fördelningen).
 
 ---
 
 ## 7. Deployment — Streamlit
 
 **Fyra flikar:**
+
 - **Score & Style:** Stort poängnummer, AI-verdict (hög/låg kvalitet), visuella stiletiketter från CLIP, stilkluster med förklaring
 - **Similar Photos:** 6 visuellt närmaste foton från träningsdatasetet (kosinuslikhet i embeddingrum)
 - **Visual Style Map:** 3D-scatter i Plotly med alla 22 374 träningsfoton färgkodade per kluster
 - **Technical Analysis:** Kompositionsöverlägg, tekniska mätvärden, stilgenre-diagram, dominanta färger
 
 **CLIP används i appen för:**
+
 1. Embedding av uppladdad bild → scoring och klustertilldelning
 2. Kosinuslikhet mot textbeskrivningar → visuella attribut (svartvit vs färg, ljus vs mörkt, osv.)
 3. Kosinuslikhet mot genrebeskrivningar → fotografi-genre (candid, fine art B&W, urban landscape, osv.)
@@ -204,23 +221,25 @@ Under projektets gång uppstod ett antal oväntade tekniska problem som krävde 
 
 ## 10. Kurskrav — checklista
 
-| Krav | Status |
-|------|--------|
-| Dataförberedelse (saknade värden, bortfall) | ✅ Bortfall hanterat, log-transform, checkpoint-system |
-| EDA med visualiseringar | ✅ Notebook 01 — score-distribution, klusteröversikt |
-| Unsupervised learning | ✅ UMAP + KMeans (8 kluster) |
-| Dimensionsreduktion | ✅ UMAP 512D → 3D (nämn PCA som alternativ) |
-| Supervised learning (ej bara linjär regression) | ✅ Random Forest + Gradient Boosting |
-| Deep learning / neural networks | ✅ CLIP ViT-B/32 (förtränad, fine-tuning ej nödvändig) |
-| Binär klassificering med AUC-ROC | ✅ Notebook 04 — confusion matrix, AUC-ROC, precision-recall |
-| Deployment / interaktiv visualisering | ✅ Streamlit + Plotly 3D |
+| Krav                                            | Status                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------ |
+| Dataförberedelse (saknade värden, bortfall)     | ✅ Bortfall hanterat, log-transform, checkpoint-system       |
+| EDA med visualiseringar                         | ✅ Notebook 01 — score-distribution, klusteröversikt         |
+| Unsupervised learning                           | ✅ UMAP + KMeans (8 kluster)                                 |
+| Dimensionsreduktion                             | ✅ UMAP 512D → 3D (nämn PCA som alternativ)                  |
+| Supervised learning (ej bara linjär regression) | ✅ Random Forest + Gradient Boosting                         |
+| Deep learning / neural networks                 | ✅ CLIP ViT-B/32 (förtränad, fine-tuning ej nödvändig)       |
+| Binär klassificering med AUC-ROC                | ✅ Notebook 04 — confusion matrix, AUC-ROC, precision-recall |
+| Deployment / interaktiv visualisering           | ✅ Streamlit + Plotly 3D                                     |
 
 **Mätvärden för regression:**
-- R² (förklaringsgrad) — förväntat 0.10–0.15
-- MAE (medelabsolutfel i log-scale)
+
+- R² = 0.104 (Ridge Regression på testset)
+- MAE = 1.17 log1p-enheter
 - Jämförelsetabell: Ridge vs RF vs GBM
 
 **Mätvärden för klassificering:**
-- AUC-ROC ≈ 0.66
+
+- AUC-ROC = 0.50 (Logistic Regression — i praktiken slumpmässigt)
 - Precision/Recall
 - Confusion matrix

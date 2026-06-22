@@ -31,9 +31,9 @@ The 512-number fingerprints are compressed into 3D space using **UMAP**, then gr
 
 ### 4. Score prediction (machine learning)
 Three models are trained to predict upvotes from the fingerprints:
-- **Ridge Regression** — simple baseline
+- **Ridge Regression** — best overall performance (R² = 0.10)
 - **Random Forest** — captures non-linear patterns
-- **Gradient Boosting** — best overall performance
+- **Gradient Boosting** — alternative ensemble approach
 
 A separate **binary classifier** also predicts whether a photo is "high quality" or "low quality" (above/below median upvotes). The best model is selected automatically based on validation performance.
 
@@ -139,7 +139,7 @@ This means the score measures **community taste**, not universal photographic qu
 
 ## Limitations
 
-- Model accuracy is modest (R² ≈ 0.10–0.15 for regression, AUC ≈ 0.66 for classification) — predicting viral content is genuinely hard
+- Model accuracy is modest (R² = 0.10 for regression, AUC = 0.50 for classification — essentially random) — predicting viral content from visual features alone is genuinely hard
 - Scores reflect a snapshot of community taste from a specific time period (2021–2024)
 - Leading lines and horizon detection are not available in the current build
 - The 3D style map uses nearest-neighbour approximation to place uploaded photos
