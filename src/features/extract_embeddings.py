@@ -30,10 +30,21 @@ def extract_embeddings(posts: list[dict]) -> tuple[np.ndarray, list[dict]]:
 
     valid_posts = [p for p in posts if Path(p.get("local_path", "")).exists()]
     embeddings = []
+    kept_posts = []
 
     for i in tqdm(range(0, len(valid_posts), BATCH_SIZE), desc="Extracting embeddings"):
         batch = valid_posts[i : i + BATCH_SIZE]
-        images = [Image.open(p["local_path"]).convert("RGB") for p in batch]
+
+        images, good = [], []
+        for p in batch:
+            try:
+                images.append(Image.open(p["local_path"]).convert("RGB"))
+                good.append(p)
+            except Exception:
+                pass  # skip corrupt/unreadable files
+
+        if not images:
+            continue
 
         inputs = processor(images=images, return_tensors="pt", padding=True).to(device)
         with torch.no_grad():
@@ -42,7 +53,9 @@ def extract_embeddings(posts: list[dict]) -> tuple[np.ndarray, list[dict]]:
                 feats = feats.pooler_output
             feats = feats / feats.norm(dim=-1, keepdim=True)
         embeddings.append(feats.cpu().numpy())
+        kept_posts.extend(good)
 
+    valid_posts = kept_posts
     return np.vstack(embeddings), valid_posts
 
 

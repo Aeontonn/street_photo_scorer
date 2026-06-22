@@ -39,7 +39,7 @@ def train_regression(embeddings, y):
     models = {
         "ridge": Pipeline([("scaler", StandardScaler()), ("model", Ridge(alpha=10.0))]),
         "rf":    RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1),
-        "gbm":   GradientBoostingRegressor(n_estimators=300, learning_rate=0.05, max_depth=4, random_state=42),
+        "gbm":   GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=4, random_state=42, subsample=0.8),
     }
 
     results = {}
@@ -69,7 +69,7 @@ def train_classifier(embeddings, y_clf):
     models = {
         "logreg": Pipeline([("scaler", StandardScaler()), ("model", LogisticRegression(max_iter=1000, C=0.1))]),
         "rf":     RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1),
-        "gbm":    GradientBoostingClassifier(n_estimators=300, learning_rate=0.05, max_depth=4, random_state=42),
+        "gbm":    GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=4, random_state=42, subsample=0.8),
     }
 
     results = {}
@@ -109,6 +109,12 @@ def run():
 
     reg_results, _, _ = train_regression(embeddings, y_reg)
     clf_results       = train_classifier(embeddings, y_clf)
+
+    # Save predictions on ALL training data for percentile scoring in the app
+    best_model = joblib.load(MODELS_DIR / "scorer.pkl")
+    all_preds = best_model.predict(embeddings)
+    np.save(MODELS_DIR / "training_predictions.npy", all_preds)
+    print(f"Saved training_predictions.npy ({len(all_preds)} entries)")
 
     print("\n=== Summary ===")
     print("Regression:", reg_results)

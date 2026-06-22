@@ -1,8 +1,6 @@
 """
-Technical photo quality analysis using classical computer vision (OpenCV).
-
-Measures sharpness, exposure, noise, contrast, rule of thirds, leading lines,
-and horizon levelness. Returns structured results ready for display.
+Technical photo quality analysis using scipy/numpy/PIL.
+No OpenCV dependency — all operations are native Python/numpy and cannot segfault.
 """
 
 from __future__ import annotations
@@ -10,9 +8,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 import math
 
-import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
+from scipy.ndimage import laplace, gaussian_filter
 
 
 # ── Data types ────────────────────────────────────────────────────────────────
@@ -20,26 +18,26 @@ from PIL import Image
 @dataclass
 class MetricResult:
     score: float          # 0–10
-    label: str            # e.g. "Sharp", "Slightly blurry"
-    detail: str           # one-sentence explanation
-    good: bool            # True = green, False = amber/red
+    label: str
+    detail: str
+    good: bool
 
 
 @dataclass
 class CompositionResult:
-    rule_of_thirds_score: float       # 0–10
+    rule_of_thirds_score: float
     rule_of_thirds_label: str
-    subject_x: Optional[float]        # 0–1 normalised position of main subject
+    subject_x: Optional[float]
     subject_y: Optional[float]
     subject_found: bool
 
     leading_lines_count: int
-    leading_lines_score: float        # 0–10
-    lines: list                       # list of (x1,y1,x2,y2) for overlay
+    leading_lines_score: float
+    lines: list
 
-    horizon_angle: Optional[float]    # degrees off level (None if not found)
-    horizon_score: float              # 0–10
-    horizon_line: Optional[tuple]     # (x1,y1,x2,y2) for overlay
+    horizon_angle: Optional[float]
+    horizon_score: float
+    horizon_line: Optional[tuple]
 
 
 @dataclass
@@ -49,31 +47,35 @@ class PhotoAnalysis:
     noise: MetricResult
     contrast: MetricResult
     composition: CompositionResult
-    overall_technical: float          # 0–10 weighted average
+    overall_technical: float
     annotated_image: Optional[np.ndarray] = field(default=None, repr=False)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _to_bgr(img_pil: Image.Image) -> np.ndarray:
-    return cv2.cvtColor(np.array(img_pil.convert("RGB")), cv2.COLOR_RGB2BGR)
-
-
-def _to_gray(bgr: np.ndarray) -> np.ndarray:
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-
-
 def _clamp(v: float, lo=0.0, hi=10.0) -> float:
     return max(lo, min(hi, v))
+
+
+def _to_gray(img: Image.Image) -> np.ndarray:
+    return np.array(img.convert("L"), dtype=np.float32)
+
+
+def _thirds_score(nx: float, ny: float) -> float:
+    thirds_x = [1/3, 2/3]
+    thirds_y = [1/3, 2/3]
+    min_dist = min(
+        math.hypot(nx - tx, ny - ty)
+        for tx in thirds_x for ty in thirds_y
+    )
+    return _clamp(10 - min_dist * 30)
 
 
 # ── Individual metrics ────────────────────────────────────────────────────────
 
 def analyze_sharpness(gray: np.ndarray) -> MetricResult:
-    """Laplacian variance — higher = sharper."""
-    lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    lap_var = float(np.var(laplace(gray)))
 
-    # Empirically calibrated thresholds for typical photos at ~1000px wide
     if lap_var >= 600:
         score, label = 9.5, "Very sharp"
     elif lap_var >= 300:
@@ -88,17 +90,19 @@ def analyze_sharpness(gray: np.ndarray) -> MetricResult:
         score, label = 0.5, "Very blurry"
 
     good = score >= 6.0
-    detail = f"Laplacian variance: {lap_var:.0f}. {'Motion blur or out-of-focus areas detected.' if not good else 'Image appears in focus.'}"
+    detail = (
+        f"Laplacian variance: {lap_var:.0f}. "
+        + ("Motion blur or out-of-focus areas detected." if not good else "Image appears in focus.")
+    )
     return MetricResult(score=score, label=label, detail=detail, good=good)
 
 
 def analyze_exposure(gray: np.ndarray) -> MetricResult:
-    """Histogram-based exposure analysis."""
-    hist = cv2.calcHist([gray], [0], None, [256], [0, 256]).flatten()
+    hist, _ = np.histogram(gray.astype(np.uint8), bins=256, range=(0, 256))
     total = gray.size
     mean_brightness = float(gray.mean())
 
-    dark_frac = float(hist[:30].sum() / total)
+    dark_frac   = float(hist[:30].sum()  / total)
     bright_frac = float(hist[230:].sum() / total)
 
     if dark_frac > 0.6:
@@ -130,13 +134,15 @@ def analyze_exposure(gray: np.ndarray) -> MetricResult:
 
 
 def analyze_noise(gray: np.ndarray) -> MetricResult:
-    """Estimate noise level from high-frequency residual after Gaussian blur."""
-    blurred = cv2.GaussianBlur(gray.astype(np.float32), (5, 5), 0)
-    residual = np.abs(gray.astype(np.float32) - blurred)
+    blurred = gaussian_filter(gray, sigma=2.0)
+    residual = np.abs(gray - blurred)
 
-    # Sample from mid-tone regions (avoid edges/detail which look like noise)
-    edge_mask = cv2.Canny(gray, 50, 150)
-    non_edge = residual[edge_mask == 0]
+    # Edge mask via gradient magnitude (avoids sampling noisy areas near edges)
+    gy = np.gradient(gray, axis=0)
+    gx = np.gradient(gray, axis=1)
+    edge_mag = np.hypot(gx, gy)
+    edge_mask = edge_mag > (edge_mag.mean() + edge_mag.std())
+    non_edge = residual[~edge_mask]
     noise_std = float(non_edge.std()) if len(non_edge) > 100 else float(residual.std())
 
     if noise_std < 2.0:
@@ -158,7 +164,6 @@ def analyze_noise(gray: np.ndarray) -> MetricResult:
 
 
 def analyze_contrast(gray: np.ndarray) -> MetricResult:
-    """RMS contrast — standard deviation of pixel values."""
     rms = float(gray.std())
 
     if rms >= 70:
@@ -179,52 +184,14 @@ def analyze_contrast(gray: np.ndarray) -> MetricResult:
 
 # ── Composition ───────────────────────────────────────────────────────────────
 
-_FACE_CASCADE = None
-
-def _get_face_cascade():
-    global _FACE_CASCADE
-    if _FACE_CASCADE is None:
-        _FACE_CASCADE = cv2.CascadeClassifier(
-            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        )
-    return _FACE_CASCADE
-
-
-def _thirds_score(nx: float, ny: float) -> float:
-    """Score 0–10 based on how close (nx, ny) is to a rule-of-thirds intersection."""
-    thirds_x = [1/3, 2/3]
-    thirds_y = [1/3, 2/3]
-    min_dist = min(
-        math.hypot(nx - tx, ny - ty)
-        for tx in thirds_x for ty in thirds_y
-    )
-    # Distance of 0 = perfect thirds, distance of 0.25+ = center or edge
-    return _clamp(10 - min_dist * 30)
-
-
-def analyze_composition(bgr: np.ndarray, gray: np.ndarray) -> CompositionResult:
+def analyze_composition(gray: np.ndarray) -> CompositionResult:
     h, w = gray.shape
 
-    # ── Rule of thirds: try face detection first, fall back to saliency proxy ──
-    cascade = _get_face_cascade()
-    faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-
-    subject_x = subject_y = None
-    subject_found = False
-
-    if len(faces) > 0:
-        # Use largest face as main subject
-        fx, fy, fw, fh = max(faces, key=lambda r: r[2] * r[3])
-        subject_x = (fx + fw / 2) / w
-        subject_y = (fy + fh / 2) / h
-        subject_found = True
-    else:
-        # Saliency proxy: use the brightest region in the image
-        # Works surprisingly well for high-contrast street shots
-        blurred = cv2.GaussianBlur(gray, (51, 51), 0)
-        _, _, _, max_loc = cv2.minMaxLoc(blurred)
-        subject_x = max_loc[0] / w
-        subject_y = max_loc[1] / h
+    # Saliency proxy: find the brightest region after strong blur
+    blurred = gaussian_filter(gray, sigma=max(h, w) / 20)
+    max_pos  = np.unravel_index(blurred.argmax(), blurred.shape)
+    subject_y = max_pos[0] / h
+    subject_x = max_pos[1] / w
 
     rot_score = _thirds_score(subject_x, subject_y)
     if rot_score >= 8:
@@ -236,178 +203,78 @@ def analyze_composition(bgr: np.ndarray, gray: np.ndarray) -> CompositionResult:
     else:
         rot_label = "Centered or at edge"
 
-    # ── Leading lines (Hough line transform) ──────────────────────────────────
-    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
-    raw_lines = cv2.HoughLinesP(
-        edges, rho=1, theta=np.pi / 180,
-        threshold=200, minLineLength=int(min(h, w) * 0.28),
-        maxLineGap=10
-    )
-
-    lines = []
-    if raw_lines is not None:
-        # Keep diagonal lines only (not purely horizontal/vertical)
-        candidates = []
-        for line in raw_lines:
-            x1, y1, x2, y2 = line[0]
-            angle = abs(math.degrees(math.atan2(y2 - y1, x2 - x1)))
-            length = math.hypot(x2 - x1, y2 - y1)
-            if 12 < angle < 78 or 102 < angle < 168:
-                candidates.append((length, angle, int(x1), int(y1), int(x2), int(y2)))
-
-        # Deduplicate: keep at most one representative per 15-degree angle bucket
-        candidates.sort(key=lambda c: c[0], reverse=True)
-        seen_buckets: set[int] = set()
-        for length, angle, x1, y1, x2, y2 in candidates:
-            bucket = int(angle // 15)
-            if bucket not in seen_buckets:
-                seen_buckets.add(bucket)
-                lines.append((x1, y1, x2, y2))
-
-    n_lines = len(lines)
-    if n_lines >= 5:
-        ll_score, ll_label = 9.0, f"{n_lines} strong leading lines"
-    elif n_lines >= 3:
-        ll_score, ll_label = 7.0, f"{n_lines} leading lines"
-    elif n_lines >= 1:
-        ll_score, ll_label = 5.0, f"{n_lines} leading line"
-    else:
-        ll_score, ll_label = 3.0, "No clear leading lines"
-
-    # ── Horizon levelness ─────────────────────────────────────────────────────
-    h_lines = cv2.HoughLinesP(
-        edges, rho=1, theta=np.pi / 180,
-        threshold=60, minLineLength=int(w * 0.25),
-        maxLineGap=30
-    )
-
-    horizon_angle = None
-    horizon_line_coords = None
-
-    if h_lines is not None:
-        candidates = []
-        for line in h_lines:
-            x1, y1, x2, y2 = line[0]
-            angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
-            length = math.hypot(x2 - x1, y2 - y1)
-            if abs(angle) < 15:  # near-horizontal
-                candidates.append((abs(angle), length, (x1, y1, x2, y2)))
-        if candidates:
-            # Longest near-horizontal line is most likely the horizon
-            candidates.sort(key=lambda x: x[1], reverse=True)
-            horizon_angle = candidates[0][0]
-            horizon_line_coords = candidates[0][2]
-
-    if horizon_angle is None:
-        h_score = 7.0  # no strong horizontal — not penalised
-    elif horizon_angle < 1.0:
-        h_score = 10.0
-    elif horizon_angle < 2.5:
-        h_score = 8.0
-    elif horizon_angle < 5.0:
-        h_score = 5.0
-    else:
-        h_score = 2.0
-
     return CompositionResult(
         rule_of_thirds_score=rot_score,
         rule_of_thirds_label=rot_label,
         subject_x=subject_x,
         subject_y=subject_y,
-        subject_found=subject_found,
-        leading_lines_count=n_lines,
-        leading_lines_score=ll_score,
-        lines=lines[:8],  # cap at 8 for display
-        horizon_angle=horizon_angle,
-        horizon_score=h_score,
-        horizon_line=horizon_line_coords,
+        subject_found=False,
+        # Leading lines and horizon not computed (no Hough transform without OpenCV)
+        leading_lines_count=0,
+        leading_lines_score=5.0,
+        lines=[],
+        horizon_angle=None,
+        horizon_score=7.0,
+        horizon_line=None,
     )
 
 
-# ── Annotated overlay image ───────────────────────────────────────────────────
+# ── Annotated overlay using PIL ImageDraw ─────────────────────────────────────
 
-def _draw_overlay(bgr: np.ndarray, comp: CompositionResult) -> np.ndarray:
-    out = bgr.copy()
-    h, w = out.shape[:2]
+def _draw_overlay(img_pil: Image.Image, comp: CompositionResult) -> np.ndarray:
+    overlay = img_pil.convert("RGBA")
+    draw    = ImageDraw.Draw(overlay)
+    w, h    = overlay.size
 
-    # Rule-of-thirds grid (thin white lines)
-    grid_color = (200, 200, 200)
+    # Rule-of-thirds grid
     for f in [1/3, 2/3]:
-        cv2.line(out, (int(w * f), 0), (int(w * f), h), grid_color, 1)
-        cv2.line(out, (0, int(h * f)), (w, int(h * f)), grid_color, 1)
+        draw.line([(int(w * f), 0), (int(w * f), h)], fill=(200, 200, 200, 180), width=1)
+        draw.line([(0, int(h * f)), (w, int(h * f))], fill=(200, 200, 200, 180), width=1)
 
-    # Thirds intersection dots
+    # Intersection dots
     for tx in [1/3, 2/3]:
         for ty in [1/3, 2/3]:
-            cv2.circle(out, (int(w * tx), int(h * ty)), 6, (255, 255, 255), 2)
+            cx, cy = int(w * tx), int(h * ty)
+            draw.ellipse([cx - 6, cy - 6, cx + 6, cy + 6],
+                         outline=(255, 255, 255, 220), width=2)
 
-    # Subject position
+    # Subject saliency dot
     if comp.subject_x is not None:
-        sx, sy = int(comp.subject_x * w), int(comp.subject_y * h)
-        color = (0, 255, 0) if comp.subject_found else (0, 200, 255)
-        cv2.circle(out, (sx, sy), 12, color, 3)
-        cv2.putText(out, "subject" if comp.subject_found else "saliency",
-                    (sx + 14, sy + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        sx = int(comp.subject_x * w)
+        sy = int(comp.subject_y * h)
+        draw.ellipse([sx - 12, sy - 12, sx + 12, sy + 12],
+                     outline=(0, 200, 255, 220), width=3)
 
-    # Leading lines
-    for x1, y1, x2, y2 in comp.lines:
-        cv2.line(out, (x1, y1), (x2, y2), (255, 100, 0), 2)
-
-    # Horizon line
-    if comp.horizon_line:
-        x1, y1, x2, y2 = comp.horizon_line
-        color = (0, 255, 255) if (comp.horizon_angle or 0) < 2.5 else (0, 80, 255)
-        cv2.line(out, (x1, y1), (x2, y2), color, 2)
-
-    return out
-
-
-# ── CLIP storytelling prompts ─────────────────────────────────────────────────
-
-STORYTELLING_PROMPTS = [
-    ("a photo that tells a compelling story",           "Storytelling"),
-    ("a photo with strong emotional impact",            "Emotional impact"),
-    ("a decisive moment caught in street photography",  "Decisive moment"),
-    ("a cinematic, film-like photograph",               "Cinematic quality"),
-    ("an original and unique photograph",               "Originality"),
-    ("a technically perfect photograph",                "Technical quality"),
-    ("a snapshot with no clear subject",                "Snapshot (negative)"),
-    ("a clichéd or generic photograph",                 "Generic (negative)"),
-]
+    return np.array(overlay.convert("RGB"))
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-def analyze(img_pil: Image.Image, max_dim: int = 1200) -> PhotoAnalysis:
+def analyze(img_pil: Image.Image, max_dim: int = 800) -> PhotoAnalysis:
     """Run all technical analyses on a PIL image. Returns a PhotoAnalysis."""
-    # Resize for speed without losing detail
     img_pil = img_pil.convert("RGB")
     w, h = img_pil.size
     if max(w, h) > max_dim:
         scale = max_dim / max(w, h)
         img_pil = img_pil.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
 
-    bgr = _to_bgr(img_pil)
-    gray = _to_gray(bgr)
+    gray = _to_gray(img_pil)
 
-    sharpness = analyze_sharpness(gray)
-    exposure = analyze_exposure(gray)
-    noise = analyze_noise(gray)
-    contrast = analyze_contrast(gray)
-    composition = analyze_composition(bgr, gray)
+    sharpness   = analyze_sharpness(gray)
+    exposure    = analyze_exposure(gray)
+    noise       = analyze_noise(gray)
+    contrast    = analyze_contrast(gray)
+    composition = analyze_composition(gray)
 
-    # Weighted overall technical score
     overall = (
         sharpness.score * 0.30 +
         exposure.score  * 0.20 +
         noise.score     * 0.10 +
         contrast.score  * 0.15 +
-        composition.rule_of_thirds_score * 0.15 +
-        composition.leading_lines_score  * 0.10
+        composition.rule_of_thirds_score * 0.25
     )
 
-    annotated = _draw_overlay(bgr, composition)
-    annotated_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+    annotated_rgb = _draw_overlay(img_pil, composition)
 
     return PhotoAnalysis(
         sharpness=sharpness,
@@ -418,3 +285,12 @@ def analyze(img_pil: Image.Image, max_dim: int = 1200) -> PhotoAnalysis:
         overall_technical=round(_clamp(overall), 1),
         annotated_image=annotated_rgb,
     )
+
+
+# Keep safe_analyze for backwards compatibility (now just calls analyze directly
+# since there's no native code to crash)
+def safe_analyze(img_pil: Image.Image, timeout: int = 30):
+    try:
+        return analyze(img_pil)
+    except Exception:
+        return None

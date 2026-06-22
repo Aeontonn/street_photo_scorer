@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 
 from scipy import stats
 
+import gc
 import joblib
 import numpy as np
 import pandas as pd
@@ -14,10 +15,9 @@ import plotly.graph_objects as go
 import streamlit as st
 import torch
 from PIL import Image, ImageOps
-from sklearn.neighbors import NearestNeighbors
 from transformers import CLIPModel, CLIPProcessor
 
-from src.analysis.photo_analysis import analyze, STORYTELLING_PROMPTS
+from src.analysis.photo_analysis import safe_analyze
 
 MODELS_DIR = Path("data/models")
 PROCESSED_DIR = Path("data/processed")
@@ -62,9 +62,9 @@ ATTRIBUTE_IMPACT = {
 }
 
 TAG_COLORS = {
-    "positive": ("1a7a4a", "d4edda"),
-    "negative": ("842029", "f8d7da"),
-    "neutral":  ("495057", "e9ecef"),
+    "positive": ("7ed4a0", "2a5040"),   # soft green text on dark green bg
+    "negative": ("f0a8a8", "5a2c2c"),   # soft rose text on dark rose bg
+    "neutral":  ("c8d8cc", "3d5046"),   # cream text on dark green bg
 }
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -78,15 +78,85 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+    /* ── Layout ── */
     .block-container { padding-top: 2rem; max-width: 1100px; }
-    .big-score { font-size: 4rem; font-weight: 800; line-height: 1; }
-    .score-label { font-size: 1.1rem; font-weight: 600; color: #666; margin-top: 0.2rem; }
+
+    /* ── Score display ── */
+    .big-score  { font-size: 4rem; font-weight: 800; line-height: 1; }
+    .score-label { font-size: 1.1rem; font-weight: 600; color: #a8c4ae; margin-top: 0.2rem; }
+
+    /* ── Tags ── */
     .tag { display: inline-block; padding: 3px 10px; border-radius: 20px;
            font-size: 0.82rem; font-weight: 500; margin: 3px 3px 3px 0; }
-    .info-card { background: #f8f9fa; border-radius: 12px; padding: 1.2rem 1.4rem;
-                 border-left: 4px solid #6c757d; margin-bottom: 0.5rem; }
-    .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #dee2e6;
-              color: #999; font-size: 0.8rem; text-align: center; }
+
+    /* ── Info card ── */
+    .info-card { background: #4a5d51; border-radius: 12px; padding: 1.2rem 1.4rem;
+                 border-left: 4px solid #c4a97d; margin-bottom: 0.5rem; }
+
+    /* ── Footer ── */
+    .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #3d5046;
+              color: #8aaa96; font-size: 0.8rem; text-align: center; }
+
+    /* ── Streamlit component overrides ── */
+
+    /* Container cards (st.container with border=True) */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #4a5d51 !important;
+        border: 1px solid #3d5046 !important;
+        border-radius: 10px !important;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #4a5d51 !important;
+        border-radius: 8px;
+        gap: 2px;
+    }
+    .stTabs [data-baseweb="tab"] { color: #a8c4ae !important; }
+    .stTabs [aria-selected="true"] {
+        background-color: #5b7061 !important;
+        color: #f0ede8 !important;
+        border-bottom: 2px solid #c4a97d !important;
+    }
+
+    /* Progress bars */
+    [data-testid="stProgressBar"] > div {
+        background-color: #3d5046 !important;
+        border-radius: 4px;
+    }
+    [data-testid="stProgressBar"] > div > div {
+        background-color: #c4a97d !important;
+        border-radius: 4px;
+    }
+
+    /* Expanders */
+    details > summary {
+        background-color: #4a5d51 !important;
+        border-radius: 6px !important;
+        color: #f0ede8 !important;
+    }
+    details[open] > summary { border-radius: 6px 6px 0 0 !important; }
+    details > div { background-color: #4a5d51 !important; }
+
+    /* Status widget (the "Analysing your photo…" spinner) */
+    [data-testid="stStatusWidget"],
+    [data-testid="stStatus"] {
+        background-color: #4a5d51 !important;
+        border: 1px solid #3d5046 !important;
+        border-radius: 8px !important;
+    }
+
+    /* Captions */
+    .stCaption p { color: #8aaa96 !important; }
+
+    /* Horizontal rule */
+    hr { border-color: #3d5046 !important; opacity: 0.6; }
+
+    /* Warning / info boxes */
+    [data-testid="stAlert"] {
+        background-color: #4a5d51 !important;
+        border: 1px solid #c4a97d !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -95,11 +165,11 @@ st.markdown("""
 
 def score_label(percentile: float) -> tuple[str, str, str]:
     """Returns (label, emoji, color)."""
-    if percentile >= 90: return "Exceptional",   "🏆", "#d4a017"
-    if percentile >= 75: return "Strong",         "⭐", "#2e7d32"
-    if percentile >= 50: return "Above average",  "👍", "#1565c0"
-    if percentile >= 25: return "Below average",  "📷", "#6c757d"
-    return               "Low match",             "🔍", "#9e9e9e"
+    if percentile >= 90: return "Exceptional",   "🏆", "#f0c060"   # warm gold
+    if percentile >= 75: return "Strong",         "⭐", "#7ed4a0"   # sage green
+    if percentile >= 50: return "Above average",  "👍", "#7eb8d4"   # soft blue
+    if percentile >= 25: return "Below average",  "📷", "#c4b8a8"   # warm grey
+    return               "Low match",             "🔍", "#8aaa96"   # muted sage
 
 
 def attr_tags_html(attributes: list) -> str:
@@ -114,11 +184,42 @@ def attr_tags_html(attributes: list) -> str:
     return " ".join(parts)
 
 
-def _clip_storytelling(img, clip, processor, device) -> list[tuple[str, float]]:
-    texts  = [t for t, _ in STORYTELLING_PROMPTS]
-    labels = [l for _, l in STORYTELLING_PROMPTS]
-    text_inputs = processor(text=texts, return_tensors="pt", padding=True, truncation=True).to(device)
+
+PHOTO_GENRES = [
+    ("Candid street photography — people in decisive moments",  "Candid / decisive moment"),
+    ("Fine art black and white photography",                    "Fine art B&W"),
+    ("Urban landscape and architectural photography",           "Urban landscape"),
+    ("Documentary and photojournalism photography",             "Documentary"),
+    ("Long exposure and light trail photography",               "Long exposure"),
+    ("Moody atmospheric night photography",                     "Night / atmosphere"),
+    ("Minimalist photography with negative space",              "Minimalist"),
+    ("Colourful vibrant street photography",                    "Colourful & vibrant"),
+]
+
+def _dominant_colors(img_pil: Image.Image, n: int = 6) -> list[tuple[int,int,int]]:
+    # PIL's built-in median-cut quantization — no sklearn/loky, cannot segfault
+    small = img_pil.convert("RGB").resize((100, 100), Image.LANCZOS)
+    quantized = small.quantize(colors=n, method=Image.Quantize.MEDIANCUT)
+    palette = quantized.getpalette()[:n * 3]
+    counts = {}
+    for px in quantized.getdata():
+        counts[px] = counts.get(px, 0) + 1
+    sorted_idx = sorted(counts, key=lambda k: counts[k], reverse=True)[:n]
+    return [(palette[i * 3], palette[i * 3 + 1], palette[i * 3 + 2]) for i in sorted_idx]
+
+
+def _analyse_image_clip(img, clip, processor, device):
+    """Single CLIP forward pass — returns embedding, visual attributes, and genre scores."""
+    attr_texts  = [t for t, _ in VISUAL_ATTRIBUTES]
+    attr_labels = [l for _, l in VISUAL_ATTRIBUTES]
+    genre_texts  = [t for t, _ in PHOTO_GENRES]
+    genre_labels = [l for _, l in PHOTO_GENRES]
+
+    all_texts = attr_texts + genre_texts
+    text_inputs = processor(text=all_texts, return_tensors="pt",
+                            padding=True, truncation=True).to(device)
     img_inputs  = processor(images=img, return_tensors="pt").to(device)
+
     with torch.no_grad():
         text_feats = clip.get_text_features(**text_inputs)
         img_feats  = clip.get_image_features(**img_inputs)
@@ -127,57 +228,49 @@ def _clip_storytelling(img, clip, processor, device) -> list[tuple[str, float]]:
         text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
         img_feats  = img_feats  / img_feats.norm(dim=-1, keepdim=True)
         sims = (img_feats @ text_feats.T).squeeze(0).cpu().numpy()
-    exp_sims = np.exp(sims * 10)
-    probs = exp_sims / exp_sims.sum()
-    return list(zip(labels, probs.tolist()))
+
+    embedding = img_feats.cpu().numpy()
+
+    # Visual attributes (first len(attr_texts) scores)
+    attr_sims = sims[:len(attr_texts)]
+    pairs = [(0,1),(2,3),(4,5),(6,7),(8,9),(10,11)]
+    attributes = []
+    for i, j in pairs:
+        attributes.append(
+            (attr_labels[i], float(attr_sims[i])) if attr_sims[i] > attr_sims[j]
+            else (attr_labels[j], float(attr_sims[j]))
+        )
+    attributes.sort(key=lambda x: x[1], reverse=True)
+
+    # Genre scores (remaining scores)
+    genre_sims = sims[len(attr_texts):]
+    exp_g = np.exp(genre_sims * 20)
+    genre_probs = exp_g / exp_g.sum()
+    genre_scores = sorted(zip(genre_labels, genre_probs.tolist()),
+                          key=lambda x: x[1], reverse=True)
+
+    return embedding, attributes, genre_scores
 
 
-def _visual_attrs_from_embedding(img_feats_np, clip, processor, device):
+def _cluster_attrs(cluster_centroid_np, clip, processor, device):
+    """Visual attribute match for a pre-computed cluster centroid embedding."""
     texts  = [t for t, _ in VISUAL_ATTRIBUTES]
     labels = [l for _, l in VISUAL_ATTRIBUTES]
-    text_inputs = processor(text=texts, return_tensors="pt", padding=True, truncation=True).to(device)
+    text_inputs = processor(text=texts, return_tensors="pt",
+                            padding=True, truncation=True).to(device)
     with torch.no_grad():
         text_feats = clip.get_text_features(**text_inputs)
         if not isinstance(text_feats, torch.Tensor): text_feats = text_feats.pooler_output
         text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
-    img_feats = torch.tensor(img_feats_np, dtype=torch.float32).to(device)
+    img_feats = torch.tensor(cluster_centroid_np, dtype=torch.float32).to(device)
     sims = (img_feats @ text_feats.T).squeeze(0).cpu().numpy()
     pairs = [(0,1),(2,3),(4,5),(6,7),(8,9),(10,11)]
     results = []
     for i, j in pairs:
-        results.append((labels[i], float(sims[i])) if sims[i] > sims[j] else (labels[j], float(sims[j])))
+        results.append((labels[i], float(sims[i])) if sims[i] > sims[j]
+                       else (labels[j], float(sims[j])))
     results.sort(key=lambda x: x[1], reverse=True)
     return results
-
-
-def _visual_attrs_from_image(img, clip, processor, device):
-    texts  = [t for t, _ in VISUAL_ATTRIBUTES]
-    labels = [l for _, l in VISUAL_ATTRIBUTES]
-    text_inputs = processor(text=texts, return_tensors="pt", padding=True, truncation=True).to(device)
-    img_inputs  = processor(images=img, return_tensors="pt").to(device)
-    with torch.no_grad():
-        text_feats = clip.get_text_features(**text_inputs)
-        img_feats  = clip.get_image_features(**img_inputs)
-        if not isinstance(img_feats,  torch.Tensor): img_feats  = img_feats.pooler_output
-        if not isinstance(text_feats, torch.Tensor): text_feats = text_feats.pooler_output
-        text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
-        img_feats  = img_feats  / img_feats.norm(dim=-1, keepdim=True)
-        sims = (img_feats @ text_feats.T).squeeze(0).cpu().numpy()
-    pairs = [(0,1),(2,3),(4,5),(6,7),(8,9),(10,11)]
-    results = []
-    for i, j in pairs:
-        results.append((labels[i], float(sims[i])) if sims[i] > sims[j] else (labels[j], float(sims[j])))
-    results.sort(key=lambda x: x[1], reverse=True)
-    return results
-
-
-def embed_image(img, clip, processor, device):
-    inputs = processor(images=img, return_tensors="pt").to(device)
-    with torch.no_grad():
-        feats = clip.get_image_features(**inputs)
-        if not isinstance(feats, torch.Tensor): feats = feats.pooler_output
-        feats = feats / feats.norm(dim=-1, keepdim=True)
-    return feats.cpu().numpy()
 
 
 @st.cache_resource
@@ -186,16 +279,26 @@ def load_all():
     clip      = CLIPModel.from_pretrained(MODEL_NAME).to(device)
     processor = CLIPProcessor.from_pretrained(MODEL_NAME)
     clip.eval()
-    scorer          = joblib.load(MODELS_DIR / "scorer.pkl")
-    classifier      = joblib.load(MODELS_DIR / "classifier.pkl")
-    training_preds  = np.load(MODELS_DIR / "training_predictions.npy")
-    embeddings      = np.load(PROCESSED_DIR / "embeddings.npy")
-    df              = pd.read_csv(PROCESSED_DIR / "clustered.csv")
-    nn = NearestNeighbors(n_neighbors=7, metric="cosine")
-    nn.fit(embeddings)
-    umap_reducer = joblib.load(MODELS_DIR / "umap_reducer.pkl")
-    kmeans       = joblib.load(MODELS_DIR / "kmeans.pkl")
-    return clip, processor, scorer, classifier, device, training_preds, embeddings, df, nn, umap_reducer, kmeans
+
+    scorer         = joblib.load(MODELS_DIR / "scorer.pkl")
+    classifier     = joblib.load(MODELS_DIR / "classifier.pkl")
+    training_preds = np.load(MODELS_DIR / "training_predictions.npy")
+
+    # float16 halves RAM — cast to float32 only when needed for computation
+    embeddings = np.load(PROCESSED_DIR / "embeddings.npy").astype(np.float16)
+    df         = pd.read_csv(PROCESSED_DIR / "clustered.csv")
+    umap_3d    = np.load(PROCESSED_DIR / "umap_3d.npy").astype(np.float16)
+
+    # Precompute per-cluster centroids — no sklearn NearestNeighbors tree needed
+    n_clusters = int(df["cluster"].max()) + 1
+    cluster_centroids = np.stack([
+        embeddings[df["cluster"].values == c].mean(axis=0)
+        for c in range(n_clusters)
+    ]).astype(np.float32)
+    cluster_centroids /= np.linalg.norm(cluster_centroids, axis=1, keepdims=True) + 1e-8
+
+    return (clip, processor, scorer, classifier, device,
+            training_preds, embeddings, df, umap_3d, cluster_centroids)
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -236,8 +339,8 @@ if not uploaded:
         with st.container(border=True):
             st.markdown("**🔬 Technical Breakdown**")
             st.markdown(
-                "Measures sharpness, exposure, noise, contrast, rule of thirds, leading lines, "
-                "and horizon levelness using computer vision — completely separate from the AI score."
+                "Measures sharpness, exposure, noise, contrast, and rule of thirds "
+                "using classical image analysis — completely separate from the AI score."
             )
 
     st.markdown("---")
@@ -256,40 +359,73 @@ photos so 5/10 literally means better than 50% of photos in the dataset.
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
 
-img = ImageOps.exif_transpose(Image.open(uploaded)).convert("RGB")
+# Resize very large uploads to keep peak memory low
+img_raw = ImageOps.exif_transpose(Image.open(uploaded)).convert("RGB")
+if max(img_raw.size) > 1200:
+    img_raw.thumbnail((1200, 1200), Image.LANCZOS)
+img = img_raw
 
-with st.status("Analysing your photo…", expanded=True) as status:
-    st.write("Loading AI models…")
-    clip, processor, scorer, classifier, device, training_preds, embeddings, df, nn, umap_reducer, kmeans = load_all()
+try:
+    with st.status("Analysing your photo…", expanded=True) as status:
+        st.write("Loading AI models…")
+        (clip, processor, scorer, classifier, device,
+         training_preds, embeddings, df, umap_3d, cluster_centroids) = load_all()
 
-    st.write("Extracting visual features…")
-    embedding = embed_image(img, clip, processor, device)
-    attributes = _visual_attrs_from_image(img, clip, processor, device)
-    story_scores = _clip_storytelling(img, clip, processor, device)
+        st.write("Extracting visual features (single AI pass)…")
+        embedding, attributes, genre_scores = _analyse_image_clip(img, clip, processor, device)
 
-    st.write("Computing aesthetic score…")
-    raw_score      = scorer.predict(embedding)[0]
-    percentile     = float(stats.percentileofscore(training_preds, raw_score))
-    aesthetic_score = round(percentile / 10, 1)
-    score_lbl, score_icon, score_color = score_label(percentile)
-    clf_pred  = classifier.predict(embedding)[0]
-    clf_proba = classifier.predict_proba(embedding)[0][1]
+        st.write("Computing aesthetic score…")
+        raw_score       = scorer.predict(embedding)[0]
+        percentile      = float(stats.percentileofscore(training_preds, raw_score))
+        aesthetic_score = round(percentile / 10, 1)
+        score_lbl, score_icon, score_color = score_label(percentile)
+        clf_pred  = classifier.predict(embedding)[0]
+        clf_proba = classifier.predict_proba(embedding)[0][1]
 
-    st.write("Finding similar photos and style cluster…")
-    _, indices       = nn.kneighbors(embedding)
-    similar_indices  = indices[0][1:]
-    umap_coords      = umap_reducer.transform(embedding)
-    cluster_id       = int(kmeans.predict(umap_coords)[0])
-    cluster_name     = CLUSTER_NAMES.get(cluster_id, f"Style group {cluster_id}")
-    cluster_mask_arr = (df["cluster"] == cluster_id).values
-    cluster_centroid = embeddings[cluster_mask_arr].mean(axis=0, keepdims=True)
-    cluster_centroid /= np.linalg.norm(cluster_centroid) + 1e-8
-    cluster_attrs    = _visual_attrs_from_embedding(cluster_centroid, clip, processor, device)
+        st.write("Finding similar photos and style cluster…")
+        # Cosine similarity in chunks to avoid large float32 temporary allocation
+        emb_f32  = embedding.squeeze().astype(np.float32)
+        emb_f32 /= np.linalg.norm(emb_f32) + 1e-8
+        chunk    = 2000
+        cos_sims = np.empty(len(embeddings), dtype=np.float32)
+        for start in range(0, len(embeddings), chunk):
+            block = embeddings[start:start+chunk].astype(np.float32)
+            cos_sims[start:start+chunk] = block @ emb_f32
+        top_idx         = np.argsort(cos_sims)[::-1][:7]
+        similar_indices = top_idx[1:]
 
-    st.write("Running technical analysis (sharpness, composition…)")
-    tech = analyze(img)
+        # Assign cluster via cosine similarity to precomputed centroids
+        # (avoids umap_reducer.transform which OOM-kills on large images)
+        emb_norm   = embedding / (np.linalg.norm(embedding) + 1e-8)
+        sims_c     = (cluster_centroids @ emb_norm.T).squeeze()
+        cluster_id = int(np.argmax(sims_c))
+        cluster_name = CLUSTER_NAMES.get(cluster_id, f"Style group {cluster_id}")
 
-    status.update(label="Analysis complete ✓", state="complete", expanded=False)
+        # Approximate UMAP position = nearest neighbour's known 3D coords
+        nearest_idx  = int(top_idx[0])
+        umap_coords  = umap_3d[nearest_idx]
+
+        cluster_mask_arr = (df["cluster"] == cluster_id).values
+        cluster_centroid = cluster_centroids[cluster_id : cluster_id + 1]
+        cluster_attrs    = _cluster_attrs(cluster_centroid, clip, processor, device)
+
+        st.write("Running technical analysis and colour palette…")
+        # Free tensors from memory before image analysis
+        gc.collect()
+        img_cv = img.copy()
+        img_cv.thumbnail((800, 800), Image.LANCZOS)
+        tech            = safe_analyze(img_cv)
+        dominant_colors = _dominant_colors(img_cv)
+
+        status.update(label="Analysis complete ✓", state="complete", expanded=False)
+
+except Exception as exc:
+    st.error(
+        f"**Something went wrong during analysis.**\n\n"
+        f"`{type(exc).__name__}: {exc}`\n\n"
+        "Try uploading a different photo, or restart the app if the problem persists."
+    )
+    st.stop()
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -331,7 +467,7 @@ with tab1:
         # AI quality verdict (replaces "Classifier")
         verdict = "High quality" if clf_pred == 1 else "Low quality"
         conf    = clf_proba if clf_pred == 1 else 1 - clf_proba
-        verdict_color = "#2e7d32" if clf_pred == 1 else "#c62828"
+        verdict_color = "#7ed4a0" if clf_pred == 1 else "#f0a8a8"
         st.markdown(
             f"**AI quality verdict:** "
             f'<span style="color:{verdict_color};font-weight:600;">{verdict}</span> '
@@ -449,7 +585,7 @@ with tab3:
         "**Your photo** is the large red diamond — rotate and zoom to explore."
     )
 
-    umap_3d = np.load(PROCESSED_DIR / "umap_3d.npy")
+    # umap_3d already loaded in load_all() — reuse it
 
     fig = go.Figure()
     colors = ["#636EFA","#EF553B","#00CC96","#AB63FA","#FFA15A","#19D3F3","#FF6692","#B6E880"]
@@ -466,9 +602,9 @@ with tab3:
         ))
 
     fig.add_trace(go.Scatter3d(
-        x=[umap_coords[0, 0]], y=[umap_coords[0, 1]], z=[umap_coords[0, 2]],
+        x=[float(umap_coords[0])], y=[float(umap_coords[1])], z=[float(umap_coords[2])],
         mode="markers",
-        marker=dict(size=14, color="red", symbol="diamond", opacity=1.0),
+        marker=dict(size=14, color="#f0c060", symbol="diamond", opacity=1.0),
         name="⭐ Your photo",
     ))
 
@@ -492,9 +628,16 @@ with tab3:
 with tab4:
     st.markdown("### Technical & compositional analysis")
     st.caption(
-        "This analysis uses classical computer vision (OpenCV), completely separate from the AI score. "
-        "It measures objective technical properties of the image."
+        "Classical image analysis (scipy/numpy) — completely separate from the AI score. "
+        "Measures objective technical properties of the image."
     )
+
+    if tech is None:
+        st.warning(
+            "Technical analysis could not be completed for this image. "
+            "Try a different photo or a smaller file."
+        )
+        st.stop()
 
     col_ann, col_metrics = st.columns([1, 1], gap="large")
 
@@ -503,9 +646,7 @@ with tab4:
         st.image(tech.annotated_image, use_container_width=True)
         st.caption(
             "White grid = rule of thirds · "
-            "Green/yellow dot = detected subject · "
-            "Orange = leading lines · "
-            "Cyan = detected horizon"
+            "Cyan dot = brightest/salient point in the frame"
         )
 
     with col_metrics:
@@ -529,105 +670,125 @@ with tab4:
         st.markdown("**Composition**")
 
         rot_icon = "✅" if comp.rule_of_thirds_score >= 6 else "➖"
-        subj_type = "face detected" if comp.subject_found else "brightness saliency"
         st.markdown(f"{rot_icon} **Rule of thirds** — {comp.rule_of_thirds_label}")
         st.progress(comp.rule_of_thirds_score / 10)
         st.caption(
-            f"Main subject located via {subj_type} at "
+            f"Brightest/most salient point estimated at "
             f"{comp.subject_x*100:.0f}% across / {comp.subject_y*100:.0f}% down the frame. "
             "Subjects near the four intersection points score highest."
         )
 
-        ll_icon = "✅" if comp.leading_lines_score >= 5 else "➖"
-        st.markdown(f"{ll_icon} **Leading lines** — {comp.leading_lines_count} detected")
-        st.progress(comp.leading_lines_score / 10)
+        st.markdown("➖ **Leading lines** — not measured")
         st.caption(
-            "Diagonal lines that guide the viewer's eye into the scene. "
-            "Street alleys, staircases, and railway tracks are classic examples."
+            "Diagonal lines that guide the viewer's eye into the scene "
+            "(staircases, alleys, railway tracks). Detection not available in this build."
         )
 
-        if comp.horizon_angle is not None:
-            h_icon = "✅" if comp.horizon_score >= 7 else "⚠️"
-            st.markdown(f"{h_icon} **Horizon level** — {comp.horizon_angle:.1f}° off")
-            st.progress(comp.horizon_score / 10)
-            st.caption(
-                f"The dominant horizontal line is tilted {comp.horizon_angle:.1f}°. "
-                + ("A slight tilt can add dynamism, but strong tilts are usually unintentional."
-                   if comp.horizon_angle > 3 else "This looks level.")
-            )
-        else:
-            st.markdown("➖ **Horizon** — no clear horizontal line detected")
-            st.caption("Common in photos with complex scenes or no clear skyline.")
+        st.markdown("➖ **Horizon** — not measured")
+        st.caption("Horizon levelness detection requires the Hough line transform, not available in the current build.")
 
-    # ── Creative assessment (replaces "CLIP storytelling") ───────────────────
+    # ── Photography style match ───────────────────────────────────────────────
     st.markdown("---")
-    st.markdown("### Creative assessment")
+    st.markdown("### Photography style")
     st.caption(
-        "The AI scores your photo against creative concepts by comparing your photo's fingerprint "
-        "to written descriptions. Scores are relative to each other, not absolute percentages."
+        "The AI compares your photo's visual fingerprint against descriptions of real photography genres. "
+        "The tallest bar is the style your photo most closely resembles."
     )
 
-    positive_labels = [l for l, _ in STORYTELLING_PROMPTS if "(negative)" not in l]
-    negative_labels = [l for l, _ in STORYTELLING_PROMPTS if "(negative)" in l]
-    story_dict = dict(story_scores)
+    genre_labels = [l for l, _ in genre_scores]
+    genre_vals   = [v for _, v in genre_scores]
+    max_g = max(genre_vals) if max(genre_vals) > 0 else 1
+    genre_norm = [v / max_g for v in genre_vals]
 
-    pos_scores  = [story_dict.get(l, 0) for l in positive_labels]
-    pos_display = [l.replace(" (negative)", "") for l in positive_labels]
+    genre_colors = ["#636EFA","#EF553B","#00CC96","#AB63FA","#FFA15A","#19D3F3","#FF6692","#B6E880"]
 
-    max_val     = max(pos_scores) if pos_scores and max(pos_scores) > 0 else 1
-    norm_scores = [s / max_val for s in pos_scores]
-
-    bar_colors = ["#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A", "#19D3F3"]
-
-    # Sort highest → lowest for readability
-    paired = sorted(zip(norm_scores, pos_display, bar_colors[:len(pos_display)]),
-                    reverse=True)
-    sorted_vals, sorted_labels, sorted_colors = zip(*paired) if paired else ([], [], [])
-
-    bar_fig = go.Figure(go.Bar(
-        x=list(sorted_vals),
-        y=list(sorted_labels),
-        orientation="h",
-        marker=dict(color=list(sorted_colors)),
-        text=[f"{v*100:.0f}%" for v in sorted_vals],
+    genre_fig = go.Figure(go.Bar(
+        x=genre_labels,
+        y=genre_norm,
+        marker=dict(color=genre_colors[:len(genre_labels)]),
+        text=[f"{v*100:.0f}%" for v in genre_norm],
         textposition="outside",
         cliponaxis=False,
     ))
-    bar_fig.update_layout(
-        height=300,
-        margin=dict(l=10, r=60, t=10, b=10),
-        xaxis=dict(visible=False, range=[0, 1.25]),
-        yaxis=dict(autorange="reversed", tickfont=dict(size=13)),
+    genre_fig.update_layout(
+        height=320,
+        margin=dict(l=10, r=10, t=10, b=10),
+        yaxis=dict(visible=False, range=[0, 1.3]),
+        xaxis=dict(tickfont=dict(size=12)),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
     )
+    st.plotly_chart(genre_fig, use_container_width=True)
 
-    radar_col, watch_col = st.columns([1, 1], gap="large")
+    top_genre = genre_labels[0]
+    st.info(f"**Best match: {top_genre}** — this is the photography style your image most resembles according to the AI.")
 
-    with radar_col:
-        st.markdown("**Positive creative signals**")
-        st.plotly_chart(bar_fig, use_container_width=True)
+    # ── Colour palette + tonal balance ───────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Visual character")
 
-    with watch_col:
-        st.markdown("**Signals to watch**")
-        st.caption(
-            "These concepts have a negative connotation — lower is better here."
+    pal_col, tone_col = st.columns([1, 1], gap="large")
+
+    with pal_col:
+        st.markdown("**Dominant colour palette**")
+        st.caption("The most common colours extracted from your photo.")
+        swatches_html = ""
+        for r, g, b in dominant_colors:
+            hex_col = f"#{r:02x}{g:02x}{b:02x}"
+            # Pick readable text colour based on luminance
+            lum = 0.299*r + 0.587*g + 0.114*b
+            text_col = "#000000" if lum > 140 else "#ffffff"
+            swatches_html += (
+                f'<div style="display:inline-block;width:80px;height:60px;'
+                f'background:{hex_col};border-radius:8px;margin:4px;'
+                f'text-align:center;line-height:60px;font-size:0.75rem;'
+                f'font-weight:600;color:{text_col};">{hex_col}</div>'
+            )
+        st.markdown(swatches_html, unsafe_allow_html=True)
+
+    with tone_col:
+        st.markdown("**Tonal balance**")
+        st.caption("How the brightness is distributed across the image — from shadows to highlights.")
+        img_arr = np.array(img.convert("L"))
+        shadows    = float((img_arr < 85).sum()  / img_arr.size)
+        midtones   = float(((img_arr >= 85) & (img_arr < 170)).sum() / img_arr.size)
+        highlights = float((img_arr >= 170).sum() / img_arr.size)
+
+        tone_fig = go.Figure(go.Bar(
+            x=["Shadows", "Midtones", "Highlights"],
+            y=[shadows, midtones, highlights],
+            marker=dict(color=["#3d5046", "#7ea090", "#c8d8cc"],
+                        line=dict(color="#3d5046", width=1)),
+            text=[f"{v*100:.0f}%" for v in [shadows, midtones, highlights]],
+            textposition="outside",
+            cliponaxis=False,
+        ))
+        tone_fig.update_layout(
+            height=260,
+            margin=dict(l=10, r=10, t=10, b=10),
+            yaxis=dict(visible=False, range=[0, 1.2]),
+            xaxis=dict(tickfont=dict(size=13)),
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
         )
-        st.markdown("")
-        for label in negative_labels:
-            clean = label.replace(" (negative)", "")
-            prob  = story_dict.get(label, 0)
-            icon  = "⚠️" if prob > 0.15 else "✅"
-            level = "High — worth reviewing" if prob > 0.15 else "Low — not a concern"
-            st.markdown(f"{icon} **{clean}**")
-            st.progress(min(prob * 4, 1.0))
-            st.caption(level)
+        st.plotly_chart(tone_fig, use_container_width=True)
+
+        dominant_tone = max(
+            [("shadow-heavy", shadows), ("balanced", midtones), ("high-key", highlights)],
+            key=lambda x: x[1]
+        )[0]
+        tone_notes = {
+            "shadow-heavy": "Dark, moody image — heavy in shadows. Typical of night scenes and high-contrast work.",
+            "balanced":     "Well-balanced tonal range across shadows, midtones, and highlights.",
+            "high-key":     "Bright, light image — dominated by highlights. Can feel airy or overexposed.",
+        }
+        st.caption(tone_notes[dominant_tone])
 
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown(
         '<div class="footer">Street Photo Scorer · '
         'Trained on r/streetphotography · '
-        'CLIP + Gradient Boosting + OpenCV · '
+        'CLIP + Gradient Boosting + scipy · '
         'Built as an ML course project</div>',
         unsafe_allow_html=True,
     )
