@@ -360,7 +360,12 @@ photos so 5/10 literally means better than 50% of photos in the dataset.
 # ── Analysis ──────────────────────────────────────────────────────────────────
 
 # Resize very large uploads to keep peak memory low
-img_raw = ImageOps.exif_transpose(Image.open(uploaded)).convert("RGB")
+try:
+    img_raw = ImageOps.exif_transpose(Image.open(uploaded)).convert("RGB")
+except Exception:
+    st.error("Felaktig filtyp — ladda upp en JPEG, PNG eller WEBP och försök igen.")
+    st.stop()
+
 if max(img_raw.size) > 1200:
     img_raw.thumbnail((1200, 1200), Image.LANCZOS)
 img = img_raw

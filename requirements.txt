@@ -1,35 +1,31 @@
-# Data collection
-praw>=7.7.0          # Reddit API
-requests>=2.31.0
-beautifulsoup4>=4.12.0
-
 # Core ML
-numpy>=1.26.0
-pandas>=2.1.0
-scikit-learn>=1.4.0
-scipy>=1.12.0
+numpy>=2.3.0
+pandas>=2.3.0
+scikit-learn>=1.7.0
+scipy>=1.16.0
+joblib>=1.5.0
 
 # Deep learning / embeddings
-torch>=2.2.0
-torchvision>=0.17.0
-timm>=0.9.0          # CLIP, ViT, etc.
-transformers>=4.38.0
+torch>=2.12.0
+transformers>=5.10.0
 
-# Dimensionality reduction
-umap-learn>=0.5.5
-matplotlib>=3.8.0
+# Dimensionality reduction & visualisation
+umap-learn>=0.5.12
+plotly>=6.3.0
+matplotlib>=3.10.0
 seaborn>=0.13.0
-plotly>=5.19.0
 
 # Image processing
-Pillow>=10.2.0
-opencv-python>=4.9.0
+Pillow>=12.0.0
+
+# Data collection
+requests>=2.31.0
+
+# App
+streamlit>=1.51.0
 
 # Notebook / dev
 ipykernel>=6.29.0
 jupyterlab>=4.1.0
-tqdm>=4.66.0
-python-dotenv>=1.0.0
-
-# App / deployment (optional)
-streamlit>=1.31.0
+tqdm>=4.67.0
+python-dotenv>=1.1.0
