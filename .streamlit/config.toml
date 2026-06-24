@@ -1,7 +1,18 @@
 [theme]
 base = "dark"
-backgroundColor     = "#242b26"
-secondaryBackgroundColor = "#4a5d51"
-textColor           = "#f0ede8"
-primaryColor        = "#c4a97d"
+backgroundColor          = "#1a1e2e"
+secondaryBackgroundColor = "#252a40"
+textColor                = "#f5f0e0"
+primaryColor             = "#e8c87a"
 font                = "sans serif"
+
+
+# Keep this as backup
+# [theme]
+# base = "dark"
+# backgroundColor          = "#1a2b1e"
+# secondaryBackgroundColor = "#253325"
+# textColor                = "#f0eadb"
+# primaryColor             = "#d4a843"
+# font                = "sans serif"
+# 

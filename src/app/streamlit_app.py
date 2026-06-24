@@ -1,71 +1,21 @@
-"""Street Photo Scorer — full Streamlit app."""
+"""Street Photo Scorer — main page."""
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[2]))
 
-from scipy import stats
-
-import gc
-import joblib
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-import torch
 from PIL import Image, ImageOps
-from transformers import CLIPModel, CLIPProcessor
 
-from src.analysis.photo_analysis import safe_analyze
-
-MODELS_DIR = Path("data/models")
-PROCESSED_DIR = Path("data/processed")
-MODEL_NAME = "openai/clip-vit-base-patch32"
-
-CLUSTER_NAMES = {
-    0: "Style group A", 1: "Style group B", 2: "Style group C", 3: "Style group D",
-    4: "Style group E", 5: "Style group F", 6: "Style group G", 7: "Style group H",
-}
-
-# Fill these in after inspecting notebook 02 — shown under cluster name in the UI.
-CLUSTER_DESCRIPTIONS: dict[int, str] = {}
-
-VISUAL_ATTRIBUTES = [
-    ("a photo with people and human subjects",          "People present"),
-    ("a photo without people, only architecture or landscape", "No people"),
-    ("a black and white photo",                        "Black & white"),
-    ("a colour photo",                                 "Colour"),
-    ("a photo taken at night or in low light",         "Low light / night"),
-    ("a photo taken in bright daylight",               "Bright daylight"),
-    ("strong contrast and shadows",                    "High contrast"),
-    ("soft light and muted tones",                     "Soft / muted"),
-    ("motion blur and movement",                       "Motion blur"),
-    ("sharp and in focus",                             "Sharp focus"),
-    ("a wide landscape or street scene",               "Wide scene"),
-    ("a tight portrait or close-up",                   "Close-up / portrait"),
-]
-
-ATTRIBUTE_IMPACT = {
-    "People present":      ("positive", "Community strongly prefers photos with human subjects"),
-    "No people":           ("negative", "Architecture/street scenes without people score lower on this subreddit"),
-    "Black & white":       ("positive", "B&W is a popular and well-received style in street photography"),
-    "Colour":              ("neutral",  "Colour photos are common — impact depends on palette and mood"),
-    "Low light / night":   ("positive", "Dramatic low-light scenes tend to perform well"),
-    "Bright daylight":     ("neutral",  "Daylight is common — strong shadows help"),
-    "High contrast":       ("positive", "Strong contrast and shadows are a hallmark of street photography"),
-    "Soft / muted":        ("neutral",  "Soft tones can work well but are less distinctive"),
-    "Motion blur":         ("positive", "Motion blur adds energy and a sense of life to the scene"),
-    "Sharp focus":         ("neutral",  "Sharp focus is standard — decisive moment matters more"),
-    "Wide scene":          ("neutral",  "Wide shots work well when the environment tells a story"),
-    "Close-up / portrait": ("positive", "Tight candid portraits tend to get strong engagement"),
-}
-
-TAG_COLORS = {
-    "positive": ("7ed4a0", "2a5040"),   # soft green text on dark green bg
-    "negative": ("f0a8a8", "5a2c2c"),   # soft rose text on dark rose bg
-    "neutral":  ("c8d8cc", "3d5046"),   # cream text on dark green bg
-}
+from src.app.shared import (
+    ATTRIBUTE_IMPACT, CLUSTER_DESCRIPTIONS, CLUSTER_NAMES, TAG_COLORS,
+    _analyse_image_clip, _cluster_attrs, _dominant_colors, _score_image,
+    attr_tags_html, load_all, score_label, shooting_tips,
+)
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -82,223 +32,128 @@ st.markdown("""
     .block-container { padding-top: 2rem; max-width: 1100px; }
 
     /* ── Score display ── */
-    .big-score  { font-size: 4rem; font-weight: 800; line-height: 1; }
-    .score-label { font-size: 1.1rem; font-weight: 600; color: #a8c4ae; margin-top: 0.2rem; }
+    .big-score   { font-size: 4rem; font-weight: 800; line-height: 1; }
+    .score-label { font-size: 1.1rem; font-weight: 600; color: #f5f0e0; margin-top: 0.2rem; }
 
     /* ── Tags ── */
-    .tag { display: inline-block; padding: 3px 10px; border-radius: 20px;
-           font-size: 0.82rem; font-weight: 500; margin: 3px 3px 3px 0; }
+    .tag { display: inline-block; padding: 4px 12px; border-radius: 20px;
+           font-size: 0.84rem; font-weight: 600; margin: 3px 3px 3px 0; }
 
     /* ── Info card ── */
-    .info-card { background: #4a5d51; border-radius: 12px; padding: 1.2rem 1.4rem;
-                 border-left: 4px solid #c4a97d; margin-bottom: 0.5rem; }
+    .info-card { background: #252a40; border-radius: 12px; padding: 1.2rem 1.4rem;
+                 border-left: 5px solid #e8c87a; margin-bottom: 0.5rem; }
+    .info-card * { color: #f5f0e0 !important; }
 
     /* ── Footer ── */
-    .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #3d5046;
-              color: #8aaa96; font-size: 0.8rem; text-align: center; }
+    .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #353a55;
+              color: #9a98c0; font-size: 0.8rem; text-align: center; }
 
-    /* ── Streamlit component overrides ── */
+    /* ── Global text ── */
+    .stMarkdown p, .stMarkdown li { color: #f5f0e0 !important; }
+    label, .stMetric label { color: #d8d4f0 !important; }
+    h1, h2, h3 { color: #f5f0e0 !important; }
 
-    /* Container cards (st.container with border=True) */
+    /* ── File uploader ── */
+    [data-testid="stFileUploader"],
+    [data-testid="stFileUploaderDropzone"] {
+        background-color: #252a40 !important;
+        border-radius: 12px !important;
+        border: 2px dashed #e8c87a !important;
+        padding: 0.5rem !important;
+    }
+    [data-testid="stFileUploader"] *,
+    [data-testid="stFileUploaderDropzone"] *,
+    [data-testid="stFileUploaderDropzoneInstructions"] * {
+        color: #f5f0e0 !important;
+    }
+    [data-testid="stFileUploader"] button {
+        background-color: #e8c87a !important;
+        color: #1a1e2e !important;
+        border: none !important;
+        border-radius: 6px !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stFileUploader"] button * {
+        color: #1a1e2e !important;
+    }
+
+    /* ── Container cards ── */
     [data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #4a5d51 !important;
-        border: 1px solid #3d5046 !important;
-        border-radius: 10px !important;
+        background-color: #252a40 !important;
+        border: 1px solid #353a55 !important;
+        border-radius: 12px !important;
     }
 
-    /* Tabs */
+    /* ── Tabs ── */
     .stTabs [data-baseweb="tab-list"] {
-        background-color: #4a5d51 !important;
-        border-radius: 8px;
-        gap: 2px;
+        background-color: #10142a !important;
+        border-radius: 10px !important;
+        padding: 5px !important;
+        gap: 4px !important;
+        border: 1px solid #353a55 !important;
     }
-    .stTabs [data-baseweb="tab"] { color: #a8c4ae !important; }
+    .stTabs [data-baseweb="tab"] {
+        color: #9a98c0 !important;
+        font-size: 0.95rem !important;
+        font-weight: 600 !important;
+        padding: 10px 22px !important;
+        border-radius: 7px !important;
+        transition: background 0.15s, color 0.15s !important;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #252a40 !important;
+        color: #f5f0e0 !important;
+    }
     .stTabs [aria-selected="true"] {
-        background-color: #5b7061 !important;
-        color: #f0ede8 !important;
-        border-bottom: 2px solid #c4a97d !important;
+        background-color: #e8c87a !important;
+        color: #1a1e2e !important;
+        font-weight: 700 !important;
+        border-bottom: none !important;
     }
 
-    /* Progress bars */
+    /* ── Progress bars ── */
     [data-testid="stProgressBar"] > div {
-        background-color: #3d5046 !important;
+        background-color: #252a40 !important;
         border-radius: 4px;
     }
     [data-testid="stProgressBar"] > div > div {
-        background-color: #c4a97d !important;
+        background-color: #e8c87a !important;
         border-radius: 4px;
     }
 
-    /* Expanders */
+    /* ── Expanders ── */
     details > summary {
-        background-color: #4a5d51 !important;
+        background-color: #252a40 !important;
         border-radius: 6px !important;
-        color: #f0ede8 !important;
+        color: #f5f0e0 !important;
+        font-weight: 600 !important;
     }
     details[open] > summary { border-radius: 6px 6px 0 0 !important; }
-    details > div { background-color: #4a5d51 !important; }
+    details > div { background-color: #252a40 !important; }
 
-    /* Status widget (the "Analysing your photo…" spinner) */
+    /* ── Status / spinner ── */
     [data-testid="stStatusWidget"],
     [data-testid="stStatus"] {
-        background-color: #4a5d51 !important;
-        border: 1px solid #3d5046 !important;
+        background-color: #252a40 !important;
+        border: 1px solid #353a55 !important;
         border-radius: 8px !important;
     }
 
-    /* Captions */
-    .stCaption p { color: #8aaa96 !important; }
+    /* ── Captions ── */
+    .stCaption p { color: #9a98c0 !important; }
 
-    /* Horizontal rule */
-    hr { border-color: #3d5046 !important; opacity: 0.6; }
+    /* ── Dividers ── */
+    hr { border-color: #353a55 !important; opacity: 1; }
 
-    /* Warning / info boxes */
+    /* ── Alerts / warnings ── */
     [data-testid="stAlert"] {
-        background-color: #4a5d51 !important;
-        border: 1px solid #c4a97d !important;
+        background-color: #252a40 !important;
+        border: 1px solid #e8c87a !important;
+        border-radius: 8px !important;
     }
+    [data-testid="stAlert"] p { color: #f5f0e0 !important; }
 </style>
 """, unsafe_allow_html=True)
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def score_label(percentile: float) -> tuple[str, str, str]:
-    """Returns (label, emoji, color)."""
-    if percentile >= 90: return "Exceptional",   "🏆", "#f0c060"   # warm gold
-    if percentile >= 75: return "Strong",         "⭐", "#7ed4a0"   # sage green
-    if percentile >= 50: return "Above average",  "👍", "#7eb8d4"   # soft blue
-    if percentile >= 25: return "Below average",  "📷", "#c4b8a8"   # warm grey
-    return               "Low match",             "🔍", "#8aaa96"   # muted sage
-
-
-def attr_tags_html(attributes: list) -> str:
-    parts = []
-    for attr_label, _ in attributes:
-        impact, _ = ATTRIBUTE_IMPACT.get(attr_label, ("neutral", ""))
-        fg, bg = TAG_COLORS[impact]
-        parts.append(
-            f'<span class="tag" style="color:#{fg};background:#{bg};">'
-            f'{attr_label}</span>'
-        )
-    return " ".join(parts)
-
-
-
-PHOTO_GENRES = [
-    ("Candid street photography — people in decisive moments",  "Candid / decisive moment"),
-    ("Fine art black and white photography",                    "Fine art B&W"),
-    ("Urban landscape and architectural photography",           "Urban landscape"),
-    ("Documentary and photojournalism photography",             "Documentary"),
-    ("Long exposure and light trail photography",               "Long exposure"),
-    ("Moody atmospheric night photography",                     "Night / atmosphere"),
-    ("Minimalist photography with negative space",              "Minimalist"),
-    ("Colourful vibrant street photography",                    "Colourful & vibrant"),
-]
-
-def _dominant_colors(img_pil: Image.Image, n: int = 6) -> list[tuple[int,int,int]]:
-    # PIL's built-in median-cut quantization — no sklearn/loky, cannot segfault
-    small = img_pil.convert("RGB").resize((100, 100), Image.LANCZOS)
-    quantized = small.quantize(colors=n, method=Image.Quantize.MEDIANCUT)
-    palette = quantized.getpalette()[:n * 3]
-    counts = {}
-    for px in quantized.getdata():
-        counts[px] = counts.get(px, 0) + 1
-    sorted_idx = sorted(counts, key=lambda k: counts[k], reverse=True)[:n]
-    return [(palette[i * 3], palette[i * 3 + 1], palette[i * 3 + 2]) for i in sorted_idx]
-
-
-def _analyse_image_clip(img, clip, processor, device):
-    """Single CLIP forward pass — returns embedding, visual attributes, and genre scores."""
-    attr_texts  = [t for t, _ in VISUAL_ATTRIBUTES]
-    attr_labels = [l for _, l in VISUAL_ATTRIBUTES]
-    genre_texts  = [t for t, _ in PHOTO_GENRES]
-    genre_labels = [l for _, l in PHOTO_GENRES]
-
-    all_texts = attr_texts + genre_texts
-    text_inputs = processor(text=all_texts, return_tensors="pt",
-                            padding=True, truncation=True).to(device)
-    img_inputs  = processor(images=img, return_tensors="pt").to(device)
-
-    with torch.no_grad():
-        text_feats = clip.get_text_features(**text_inputs)
-        img_feats  = clip.get_image_features(**img_inputs)
-        if not isinstance(img_feats,  torch.Tensor): img_feats  = img_feats.pooler_output
-        if not isinstance(text_feats, torch.Tensor): text_feats = text_feats.pooler_output
-        text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
-        img_feats  = img_feats  / img_feats.norm(dim=-1, keepdim=True)
-        sims = (img_feats @ text_feats.T).squeeze(0).cpu().numpy()
-
-    embedding = img_feats.cpu().numpy()
-
-    # Visual attributes (first len(attr_texts) scores)
-    attr_sims = sims[:len(attr_texts)]
-    pairs = [(0,1),(2,3),(4,5),(6,7),(8,9),(10,11)]
-    attributes = []
-    for i, j in pairs:
-        attributes.append(
-            (attr_labels[i], float(attr_sims[i])) if attr_sims[i] > attr_sims[j]
-            else (attr_labels[j], float(attr_sims[j]))
-        )
-    attributes.sort(key=lambda x: x[1], reverse=True)
-
-    # Genre scores (remaining scores)
-    genre_sims = sims[len(attr_texts):]
-    exp_g = np.exp(genre_sims * 20)
-    genre_probs = exp_g / exp_g.sum()
-    genre_scores = sorted(zip(genre_labels, genre_probs.tolist()),
-                          key=lambda x: x[1], reverse=True)
-
-    return embedding, attributes, genre_scores
-
-
-def _cluster_attrs(cluster_centroid_np, clip, processor, device):
-    """Visual attribute match for a pre-computed cluster centroid embedding."""
-    texts  = [t for t, _ in VISUAL_ATTRIBUTES]
-    labels = [l for _, l in VISUAL_ATTRIBUTES]
-    text_inputs = processor(text=texts, return_tensors="pt",
-                            padding=True, truncation=True).to(device)
-    with torch.no_grad():
-        text_feats = clip.get_text_features(**text_inputs)
-        if not isinstance(text_feats, torch.Tensor): text_feats = text_feats.pooler_output
-        text_feats = text_feats / text_feats.norm(dim=-1, keepdim=True)
-    img_feats = torch.tensor(cluster_centroid_np, dtype=torch.float32).to(device)
-    sims = (img_feats @ text_feats.T).squeeze(0).cpu().numpy()
-    pairs = [(0,1),(2,3),(4,5),(6,7),(8,9),(10,11)]
-    results = []
-    for i, j in pairs:
-        results.append((labels[i], float(sims[i])) if sims[i] > sims[j]
-                       else (labels[j], float(sims[j])))
-    results.sort(key=lambda x: x[1], reverse=True)
-    return results
-
-
-@st.cache_resource
-def load_all():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    clip      = CLIPModel.from_pretrained(MODEL_NAME).to(device)
-    processor = CLIPProcessor.from_pretrained(MODEL_NAME)
-    clip.eval()
-
-    scorer         = joblib.load(MODELS_DIR / "scorer.pkl")
-    classifier     = joblib.load(MODELS_DIR / "classifier.pkl")
-    training_preds = np.load(MODELS_DIR / "training_predictions.npy")
-
-    # float16 halves RAM — cast to float32 only when needed for computation
-    embeddings = np.load(PROCESSED_DIR / "embeddings.npy").astype(np.float16)
-    df         = pd.read_csv(PROCESSED_DIR / "clustered.csv")
-    umap_3d    = np.load(PROCESSED_DIR / "umap_3d.npy").astype(np.float16)
-
-    # Precompute per-cluster centroids — no sklearn NearestNeighbors tree needed
-    n_clusters = int(df["cluster"].max()) + 1
-    cluster_centroids = np.stack([
-        embeddings[df["cluster"].values == c].mean(axis=0)
-        for c in range(n_clusters)
-    ]).astype(np.float32)
-    cluster_centroids /= np.linalg.norm(cluster_centroids, axis=1, keepdims=True) + 1e-8
-
-    return (clip, processor, scorer, classifier, device,
-            training_preds, embeddings, df, umap_3d, cluster_centroids)
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -359,7 +214,6 @@ photos so 5/10 literally means better than 50% of photos in the dataset.
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
 
-# Resize very large uploads to keep peak memory low
 try:
     img_raw = ImageOps.exif_transpose(Image.open(uploaded)).convert("RGB")
 except Exception:
@@ -376,51 +230,11 @@ try:
         (clip, processor, scorer, classifier, device,
          training_preds, embeddings, df, umap_3d, cluster_centroids) = load_all()
 
-        st.write("Extracting visual features (single AI pass)…")
-        embedding, attributes, genre_scores = _analyse_image_clip(img, clip, processor, device)
+        models = (clip, processor, scorer, classifier, device,
+                  training_preds, embeddings, df, umap_3d, cluster_centroids)
 
-        st.write("Computing aesthetic score…")
-        raw_score       = scorer.predict(embedding)[0]
-        percentile      = float(stats.percentileofscore(training_preds, raw_score))
-        aesthetic_score = round(percentile / 10, 1)
-        score_lbl, score_icon, score_color = score_label(percentile)
-        clf_pred  = classifier.predict(embedding)[0]
-        clf_proba = classifier.predict_proba(embedding)[0][1]
-
-        st.write("Finding similar photos and style cluster…")
-        # Cosine similarity in chunks to avoid large float32 temporary allocation
-        emb_f32  = embedding.squeeze().astype(np.float32)
-        emb_f32 /= np.linalg.norm(emb_f32) + 1e-8
-        chunk    = 2000
-        cos_sims = np.empty(len(embeddings), dtype=np.float32)
-        for start in range(0, len(embeddings), chunk):
-            block = embeddings[start:start+chunk].astype(np.float32)
-            cos_sims[start:start+chunk] = block @ emb_f32
-        top_idx         = np.argsort(cos_sims)[::-1][:7]
-        similar_indices = top_idx[1:]
-
-        # Assign cluster via cosine similarity to precomputed centroids
-        # (avoids umap_reducer.transform which OOM-kills on large images)
-        emb_norm   = embedding / (np.linalg.norm(embedding) + 1e-8)
-        sims_c     = (cluster_centroids @ emb_norm.T).squeeze()
-        cluster_id = int(np.argmax(sims_c))
-        cluster_name = CLUSTER_NAMES.get(cluster_id, f"Style group {cluster_id}")
-
-        # Approximate UMAP position = nearest neighbour's known 3D coords
-        nearest_idx  = int(top_idx[0])
-        umap_coords  = umap_3d[nearest_idx]
-
-        cluster_mask_arr = (df["cluster"] == cluster_id).values
-        cluster_centroid = cluster_centroids[cluster_id : cluster_id + 1]
-        cluster_attrs    = _cluster_attrs(cluster_centroid, clip, processor, device)
-
-        st.write("Running technical analysis and colour palette…")
-        # Free tensors from memory before image analysis
-        gc.collect()
-        img_cv = img.copy()
-        img_cv.thumbnail((800, 800), Image.LANCZOS)
-        tech            = safe_analyze(img_cv)
-        dominant_colors = _dominant_colors(img_cv)
+        st.write("Extracting visual features and scoring…")
+        r = _score_image(img, *models)
 
         status.update(label="Analysis complete ✓", state="complete", expanded=False)
 
@@ -431,6 +245,24 @@ except Exception as exc:
         "Try uploading a different photo, or restart the app if the problem persists."
     )
     st.stop()
+
+embedding       = r["embedding"]
+attributes      = r["attributes"]
+genre_scores    = r["genre_scores"]
+percentile      = r["percentile"]
+aesthetic_score = r["aesthetic_score"]
+score_lbl       = r["score_lbl"]
+score_icon      = r["score_icon"]
+score_color     = r["score_color"]
+clf_pred        = r["clf_pred"]
+clf_proba       = r["clf_proba"]
+similar_indices = r["similar_indices"]
+cluster_id      = r["cluster_id"]
+cluster_name    = r["cluster_name"]
+umap_coords     = r["umap_coords"]
+cluster_attrs   = r["cluster_attrs"]
+tech            = r["tech"]
+dominant_colors = r["dominant_colors"]
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -510,6 +342,17 @@ with tab1:
     )
     st.markdown(attr_tags_html(attributes), unsafe_allow_html=True)
 
+    # ── Shooting tips ─────────────────────────────────────────────────────────
+    tips = shooting_tips(attributes, percentile)
+    if tips:
+        st.markdown("")
+        st.markdown("#### 📸 Shoot this")
+        for tip in tips:
+            st.markdown(
+                f'<div class="info-card">{tip}</div>',
+                unsafe_allow_html=True,
+            )
+
     st.markdown("")
     with st.expander("Detailed breakdown"):
         impact_icons = {"positive": "✅", "negative": "⚠️", "neutral": "➖"}
@@ -561,7 +404,7 @@ with tab2:
     )
 
     cols = st.columns(3)
-    for i, idx in enumerate(similar_indices[:6]):
+    for i, idx in enumerate(similar_indices[:18]):
         row = df.iloc[idx]
         with cols[i % 3]:
             try:
