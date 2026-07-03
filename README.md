@@ -73,7 +73,7 @@ python -m src.models.cluster                   # Cluster into style groups
 python -m src.models.scorer                    # Train scoring models
 
 # 3. Launch the app
-streamlit run src/app/streamlit_app.py
+streamlit run src/app/Score_Photos.py
 ```
 
 The app opens at `http://localhost:8501`.

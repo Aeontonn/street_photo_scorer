@@ -1,4 +1,4 @@
-"""Shared ML logic — imported by both streamlit_app.py and pages/."""
+"""Shared ML logic — imported by both Score_Photos.py and pages/."""
 
 from __future__ import annotations
 from pathlib import Path
@@ -19,10 +19,33 @@ PROCESSED_DIR = Path("data/processed")
 MODEL_NAME    = "openai/clip-vit-base-patch32"
 
 CLUSTER_NAMES: dict[int, str] = {
-    0: "Style group A", 1: "Style group B", 2: "Style group C", 3: "Style group D",
-    4: "Style group E", 5: "Style group F", 6: "Style group G", 7: "Style group H",
+    0: "Neon Nights",
+    1: "Minimalism & Silhouettes",
+    2: "Quiet Candids",
+    3: "B&W Classics",
+    4: "Transit & Underground",
+    5: "Faces & Documentary",
+    6: "Street Life & Markets",
+    7: "Rain & Moody Streets",
 }
-CLUSTER_DESCRIPTIONS: dict[int, str] = {}
+CLUSTER_DESCRIPTIONS: dict[int, str] = {
+    0: "Colourful night scenes — neon signs, glowing shopfronts, food stalls and "
+       "city lights after dark. Bold colour and artificial light define this style.",
+    1: "Minimalist compositions — lone figures in negative space, silhouettes, fog "
+       "and strong geometry. Less is more: one subject, lots of emptiness.",
+    2: "Quiet everyday moments — soft light, reflections and unposed slices of daily "
+       "life. Subtle rather than dramatic.",
+    3: "Classic high-contrast black & white — deep shadows, geometric light and "
+       "candid figures. The largest style group and the heart of traditional street photography.",
+    4: "Trains, metros and stations — commuters, windows and underground light. "
+       "Transit scenes with a documentary feel.",
+    5: "People up close — street portraits, protests and documentary moments where "
+       "faces and human stories carry the frame.",
+    6: "Busy street life — markets, vendors, food stalls and warm bustling scenes "
+       "full of activity and detail.",
+    7: "Rain, fog and moody weather — umbrellas, wet reflections and empty streets. "
+       "Atmospheric but the lowest-scoring style group in the dataset.",
+}
 
 VISUAL_ATTRIBUTES = [
     ("a photo with people and human subjects",                    "People present"),

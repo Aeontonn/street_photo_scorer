@@ -39,6 +39,8 @@
 - Enstaka korrumperade PNG-filer hanterades via try/except i embedding-steget och hoppades över
 - Arctic Shift-arkivet innehåller alla publika Reddit-poster oavsett om originalet är raderat, vilket minimerar bortfall jämfört med att scrapa Reddit direkt
 
+**Kategoriska variabler:** Ingen encoding (one-hot, label encoding) behövdes — alla features är rent numeriska. Bilderna representeras som 512-dimensionella CLIP-embeddings (kontinuerliga flyttal) och target-variabeln är numerisk. De kategoriska metadatafälten (author, kluster-ID) används inte som modellfeatures; kluster-ID är i stället ett *resultat* av unsupervised learning, inte en input. Detta är ett medvetet designval — hade t.ex. author använts som feature hade det krävt encoding och riskerat läckage.
+
 ---
 
 ## 3. EDA (Exploratory Data Analysis)
@@ -224,6 +226,7 @@ Under projektets gång uppstod ett antal oväntade tekniska problem som krävde 
 | Krav                                            | Status                                                       |
 | ----------------------------------------------- | ------------------------------------------------------------ |
 | Dataförberedelse (saknade värden, bortfall)     | ✅ Bortfall hanterat, log-transform, checkpoint-system       |
+| Kategoriska variabler (encoding)                | ✅ Ej tillämpligt — alla features är numeriska CLIP-embeddings (motiverat i avsnitt 2) |
 | EDA med visualiseringar                         | ✅ Notebook 01 — score-distribution, klusteröversikt         |
 | Unsupervised learning                           | ✅ UMAP + KMeans (8 kluster)                                 |
 | Dimensionsreduktion                             | ✅ UMAP 512D → 3D (nämn PCA som alternativ)                  |

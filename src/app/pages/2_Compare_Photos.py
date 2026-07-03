@@ -5,21 +5,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[3]))
 
-from scipy import stats
-import gc
-import numpy as np
 import streamlit as st
 from PIL import Image, ImageOps
 
 from src.app.shared import (
     load_all,
     _score_image,
-    _analyse_image_clip,
     attr_tags_html,
     shooting_tips,
     ATTRIBUTE_IMPACT,
-    CLUSTER_NAMES,
-    TAG_COLORS,
 )
 
 st.set_page_config(page_title="Compare Photos", layout="wide", page_icon="⚖️")

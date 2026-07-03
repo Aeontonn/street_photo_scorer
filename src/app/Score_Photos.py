@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from PIL import Image, ImageOps
+from scipy import stats
 
 from src.app.shared import (
     ATTRIBUTE_IMPACT, CLUSTER_DESCRIPTIONS, CLUSTER_NAMES, TAG_COLORS,
@@ -320,8 +321,8 @@ with tab1:
         with st.expander("How the score is calculated"):
             st.markdown(
                 "1. Your photo is converted to a **512-number fingerprint** by OpenAI's CLIP model\n"
-                "2. A **Gradient Boosting** model predicts an expected upvote count\n"
-                "3. A **Random Forest** classifier independently labels it high or low quality\n"
+                "2. A **Ridge Regression** model predicts an expected upvote count\n"
+                "3. A **Logistic Regression** classifier independently labels it high or low quality\n"
                 "4. The raw score is **percentile-ranked** against all training photos "
                 "so 5.0 = better than 50% of the dataset\n"
             )
@@ -371,6 +372,10 @@ with tab1:
     manual_desc = CLUSTER_DESCRIPTIONS.get(cluster_id)
     if manual_desc:
         st.markdown(manual_desc)
+        st.markdown(
+            f"Your photo shares visual style with **{cluster_size} other photos** in this group "
+            f"(median **{cluster_med:.0f} upvotes**)."
+        )
     else:
         st.markdown(
             f"Your photo shares visual style with **{cluster_size} other photos** in this group "
@@ -636,7 +641,7 @@ with tab4:
     st.markdown(
         '<div class="footer">Street Photo Scorer · '
         'Trained on r/streetphotography · '
-        'CLIP + Gradient Boosting + scipy · '
+        'CLIP + Ridge Regression + scipy · '
         'Built as an ML course project</div>',
         unsafe_allow_html=True,
     )
