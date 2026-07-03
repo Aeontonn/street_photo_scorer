@@ -139,7 +139,7 @@ This means the score measures **community taste**, not universal photographic qu
 
 ## Limitations
 
-- Model accuracy is modest (R² = 0.10 for regression, AUC = 0.50 for classification — essentially random) — predicting viral content from visual features alone is genuinely hard
+- Model accuracy is modest (R² = 0.10 for regression, AUC = 0.69 for classification — better than chance but far from reliable) — predicting viral content from visual features alone is genuinely hard
 - Scores reflect a snapshot of community taste from a specific time period (2021–2024)
 - Leading lines and horizon detection are not available in the current build
 - The 3D style map uses nearest-neighbour approximation to place uploaded photos

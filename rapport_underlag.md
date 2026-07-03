@@ -125,14 +125,14 @@ _(Klusternamnen sattes manuellt efter visuell inspektion av toppfotona i varje k
 
 **Bästa klassifierare:** Logistic Regression
 
-**Faktiskt AUC-ROC = 0.50** — i praktiken samma som att gissa slumpmässigt. Det är ett viktigt resultat: binär klassificering av "hög vs låg kvalitet" baserat enbart på visuella CLIP-embeddings fungerar inte bättre än slump.
+**Faktiskt AUC-ROC = 0.69** (accuracy 64 %, testset 4 475 foton) — klart bättre än slump (0.50), men långt ifrån tillförlitligt. Jämförelse: Logistic Regression 0.693, Gradient Boosting 0.685, Random Forest 0.669. Visuellt innehåll bär alltså en verklig signal om vilka foton som får upvotes, men räcker inte för säkra prediktioner på individnivå.
 
-**Varför så dåliga resultat?**
+**Varför inte bättre?**
 
 - Upvotes påverkas av faktorer utanför bilden: tidpunkt för publicering, author-popularitet, trending topics, titeln på posten
 - Estetik är subjektivt — CLIP fångar visuellt innehåll men inte social kontext
-- Klassificeringsgränsen (median = 5 upvotes) delar datasetet vid ett mycket lågt värde, vilket gör att brus i upvote-räkning dominerar
-- R² = 0.10 är ändå meningsfullt — det visar att visuell stil har _viss_ förutsägbarhet, men att den sociala kontexten är avgörande
+- Klassificeringsgränsen (median = 5 upvotes) delar datasetet vid ett mycket lågt värde, vilket gör att brus i upvote-räkning påverkar mycket
+- Konsekvent bild: R² = 0.10 för regression och AUC = 0.69 för klassificering visar båda att visuell stil har _viss_ förutsägbarhet, men att den sociala kontexten är avgörande
 
 **Score-normalisering:**
 Percentilbaserad normalisering: score = "bättre än X% av de 22 374 träningsbilderna". Det ger en mer intuitiv och rättvis skala än linjär normalisering (som gav systematiskt låga scores pga power-law-fördelningen).
@@ -247,6 +247,6 @@ Under projektets gång uppstod ett antal oväntade tekniska problem som krävde 
 
 **Mätvärden för klassificering:**
 
-- AUC-ROC = 0.50 (Logistic Regression — i praktiken slumpmässigt)
+- AUC-ROC = 0.69 (Logistic Regression — bättre än slump men långt ifrån tillförlitligt; accuracy 64 %)
 - Precision/Recall
 - Confusion matrix

@@ -14,3 +14,4 @@ venv/
 .virtual_documents/
 .claude/
 presentation/
+notebooks/data/
