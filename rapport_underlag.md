@@ -81,18 +81,18 @@
 
 **Klusterresultat (22 374 foton, 8 kluster):**
 
-| Kluster | n foton | Medel-score (upvotes) |
-| ------- | ------- | --------------------- |
-| 4       | 1 891   | 75.8                  |
-| 6       | 3 005   | 67.4                  |
-| 0       | 2 300   | 56.5                  |
-| 2       | 2 910   | 54.4                  |
-| 1       | 1 520   | 54.1                  |
-| 5       | 2 477   | 54.0                  |
-| 3       | 5 027   | 51.1                  |
-| 7       | 3 244   | 49.6                  |
+| Kluster | Namn                     | n foton | Medel-score (upvotes) |
+| ------- | ------------------------ | ------- | --------------------- |
+| 4       | Transit & Underground    | 1 891   | 75.8                  |
+| 6       | Street Life & Markets    | 3 005   | 67.4                  |
+| 0       | Neon Nights              | 2 300   | 56.5                  |
+| 2       | Quiet Candids            | 2 910   | 54.4                  |
+| 1       | Minimalism & Silhouettes | 1 520   | 54.1                  |
+| 5       | Faces & Documentary      | 2 477   | 54.0                  |
+| 3       | B&W Classics             | 5 027   | 51.1                  |
+| 7       | Rain & Moody Streets     | 3 244   | 49.6                  |
 
-_(Klusternamnen fylls i efter inspektion av notebook 02)_
+_(Klusternamnen sattes manuellt efter visuell inspektion av toppfotona i varje kluster)_
 
 **Viktig observation:** Kluster 4 och 6 har ca 50% högre medel-score än kluster 3 och 7. Det finns alltså tydliga visuella stilar som premieras av communityn. Kluster 3 är också störst (5 027 foton) vilket tyder på att det fångar en "genomsnittlig" Reddit-stil med lägre engagement.
 
@@ -144,9 +144,13 @@ Percentilbaserad normalisering: score = "bättre än X% av de 22 374 träningsbi
 **Fyra flikar:**
 
 - **Score & Style:** Stort poängnummer, AI-verdict (hög/låg kvalitet), visuella stiletiketter från CLIP, stilkluster med förklaring
-- **Similar Photos:** 6 visuellt närmaste foton från träningsdatasetet (kosinuslikhet i embeddingrum)
+- **Similar Photos:** 18 visuellt närmaste foton från träningsdatasetet (kosinuslikhet i embeddingrum)
 - **Visual Style Map:** 3D-scatter i Plotly med alla 22 374 träningsfoton färgkodade per kluster
 - **Technical Analysis:** Kompositionsöverlägg, tekniska mätvärden, stilgenre-diagram, dominanta färger
+
+**Extra sida — Compare Photos:** Ladda upp två foton, se vilken som scorar högst (vinnarbanner), sida-vid-sida-jämförelse av score/attribut/tips samt en attribut-diff (endast i A / endast i B / gemensamma drag).
+
+**"Shoot this"-tips:** Regelbaserade fotograferingsråd genereras från bildens visuella attribut och percentil (t.ex. "lägg till ett mänskligt element" för arkitekturbilder med låg score).
 
 **CLIP används i appen för:**
 
