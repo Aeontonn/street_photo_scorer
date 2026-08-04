@@ -80,6 +80,59 @@ The app opens at `http://localhost:8501`.
 
 ---
 
+## API
+
+The scoring pipeline is also available as a standalone FastAPI service (`src/api/main.py`),
+built on the same `src/scoring/scorer.py` module the Streamlit app uses — no model
+retraining needed, just a different way to call the existing pipeline. Useful for
+building a separate frontend (e.g. a batch-ranking UI) against.
+
+```bash
+# Requires the trained models in data/models/ and the processed dataset in
+# data/processed/ (see step 2 of the Quickstart above).
+uvicorn src.api.main:app --reload
+```
+
+The API opens at `http://localhost:8000` (interactive docs at `http://localhost:8000/docs`).
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/health` | GET | Health check |
+| `/score` | POST | Score a single uploaded image |
+| `/score-batch` | POST | Score multiple uploaded images, ranked best-first |
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Score one photo
+curl -X POST http://localhost:8000/score \
+  -F "file=@photo.jpg"
+
+# Score a batch, ranked
+curl -X POST http://localhost:8000/score-batch \
+  -F "files=@photo1.jpg" -F "files=@photo2.jpg" -F "files=@photo3.jpg"
+```
+
+`/score` returns:
+
+```json
+{
+  "filename": "photo.jpg",
+  "aesthetic_score": 7.2,
+  "percentile": 72.3,
+  "score_label": "Strong",
+  "quality_verdict": "high",
+  "confidence": 0.81,
+  "cluster_id": 3,
+  "cluster_name": "B&W Classics",
+  "attributes": [{"label": "Black & white", "similarity": 0.284}, ...],
+  "genre_scores": [{"label": "Fine art B&W", "score": 0.41}, ...]
+}
+```
+
+---
+
 ## Project structure
 
 ```
@@ -100,7 +153,9 @@ street_photo_scorer/
 │   ├── features/        # CLIP embedding extraction
 │   ├── models/          # Clustering, regression, and classifier training
 │   ├── analysis/        # Technical quality analysis (scipy/numpy/PIL)
-│   └── app/             # Streamlit web app
+│   ├── scoring/         # Shared scoring pipeline (scorer.py) — used by app/ and api/
+│   ├── app/             # Streamlit web app
+│   └── api/             # FastAPI service exposing the scoring pipeline
 │
 ├── requirements.txt
 └── README.md
