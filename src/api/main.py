@@ -10,8 +10,10 @@ Run locally with:
 from __future__ import annotations
 
 import io
+import os
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
@@ -19,10 +21,16 @@ from starlette.concurrency import run_in_threadpool
 
 from src.scoring.scorer import load_resources, score_image
 
-# Local dev origins for the React frontend (Vite/CRA default ports).
+load_dotenv()
+
+# Comma-separated list of allowed frontend origins, e.g.
+#   ALLOWED_ORIGINS=https://scorer.example.com,https://www.scorer.example.com
+# Falls back to the React dev server's default ports (Vite/CRA) if unset.
+_default_origins = "http://localhost:3000,http://localhost:5173"
 ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173",
+    origin.strip()
+    for origin in os.environ.get("ALLOWED_ORIGINS", _default_origins).split(",")
+    if origin.strip()
 ]
 
 

@@ -95,6 +95,14 @@ uvicorn src.api.main:app --reload
 
 The API opens at `http://localhost:8000` (interactive docs at `http://localhost:8000/docs`).
 
+CORS is restricted to an allowlist of frontend origins, controlled by `ALLOWED_ORIGINS` in
+`.env` (comma-separated). Defaults to the React dev server's ports (`localhost:3000`,
+`localhost:5173`) if unset — set it to your deployed frontend's URL(s) in production:
+
+```bash
+ALLOWED_ORIGINS=https://scorer.example.com,https://www.scorer.example.com
+```
+
 | Endpoint | Method | Description |
 |---|---|---|
 | `/health` | GET | Health check |
