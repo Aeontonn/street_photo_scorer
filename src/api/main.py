@@ -10,16 +10,42 @@ Run locally with:
 from __future__ import annotations
 
 import io
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
+from starlette.concurrency import run_in_threadpool
 
-from src.scoring.scorer import score_image
+from src.scoring.scorer import load_resources, score_image
+
+# Local dev origins for the React frontend (Vite/CRA default ports).
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load CLIP + the trained models once at startup instead of on the first
+    # request, so the first real user isn't the one paying the load cost.
+    await run_in_threadpool(load_resources)
+    yield
+
 
 app = FastAPI(
     title="Street Photo Scorer API",
     description="Score street photos for aesthetic quality using a CLIP + regression pipeline.",
     version="0.1.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -40,7 +66,7 @@ async def score(file: UploadFile = File(...)):
     """Score a single uploaded image."""
     data = await file.read()
     image = _load_image(data, file.filename)
-    result = score_image(image)
+    result = await run_in_threadpool(score_image, image)
     return {"filename": file.filename, **result}
 
 
@@ -53,7 +79,7 @@ async def score_batch(files: list[UploadFile] = File(...)):
         data = await f.read()
         try:
             image = _load_image(data, f.filename)
-            result = score_image(image)
+            result = await run_in_threadpool(score_image, image)
             scored.append({"filename": f.filename, **result})
         except HTTPException as exc:
             failed.append({"filename": f.filename, "error": exc.detail})
