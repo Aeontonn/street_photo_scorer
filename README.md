@@ -1,8 +1,8 @@
 ---
 title: Street Photo Scorer
 emoji: 📷
-sdk: docker
-app_port: 7860
+sdk: streamlit
+app_file: src/app/Score_Photos.py
 pinned: false
 ---
 
@@ -11,47 +11,42 @@ pinned: false
 ![Screenshot placeholder](docs/screenshot.png)
 <!-- Add a screenshot of the site at docs/screenshot.png -->
 
-Live site: _add your Vercel URL here_ | API: _add your Hugging Face Space URL here_
+Live site: _add your Streamlit app URL here_
 
-## Website (web/ + API)
+## Live app
 
-Drop in a street photo and get a 0 to 10 score, a quality verdict, visual traits and a genre match.
-
-```
-web/   Static frontend (HTML, CSS, JS). Hosted on Vercel.
-src/   Python ML code and the FastAPI service (src/api/main.py). Hosted on a Hugging Face Space (Docker).
-```
+The deployed site is the Streamlit app (`src/app/Score_Photos.py`) on Streamlit Community Cloud.
+Upload a street photo and get a 0 to 10 score, a quality verdict, visual traits, similar photos and a technical breakdown.
 
 ### Run locally
 
 ```bash
-# 1. Backend. Needs the model files in deploy_bundle/ (see "Model files" below).
-pip install -r requirements-api.txt
-ARTIFACTS_DIR=deploy_bundle python -m uvicorn src.api.main:app --port 8000
-
-# No model files or torch? Run with clearly labelled fake scores instead:
-DEMO_MODE=1 python -m uvicorn src.api.main:app --port 8000
-
-# 2. Frontend (second terminal). web/config.js already points at http://localhost:8000
-cd web
-python -m http.server 8080
+pip install -r requirements.txt
+streamlit run src/app/Score_Photos.py
 ```
 
-Open http://localhost:8080. The API docs are at http://localhost:8000/docs.
-
-Uploads are limited to JPG, PNG or WebP up to 10 MB. Large photos are resized to 1200 px on the long side before scoring.
-If the real model cannot load, the API switches to demo mode on its own and `/health` reports `"model": "demo"`.
-
-### Model files
-
-The API needs `models/` (about 120 KB) and `processed/` (about 50 MB) from the trained pipeline.
-`tools/build_deploy_assets.py` builds them, and they are git-ignored. CLIP (about 600 MB) is downloaded from Hugging Face automatically.
+The trained model files are committed in `data/models/` and `data/processed/`, so no training or scraping is needed.
+CLIP (about 600 MB) is downloaded from Hugging Face on first run.
 
 ### How it is deployed
 
-- **Backend:** Hugging Face Space with the Docker SDK, using the root `Dockerfile` and `requirements-api.txt`. Model files are uploaded to the Space under `data/`.
-- **Frontend:** Vercel, with the project root set to `web/`. Set your Space URL in `web/config.js`.
-- **CORS:** set `ALLOWED_ORIGINS` in the Space settings to your Vercel URL.
+1. Push to GitHub (the model files in `data/` are included).
+2. On share.streamlit.io, create an app from the repo, branch `main`, main file `src/app/Score_Photos.py`.
+3. Dependencies come from `src/app/requirements.txt` (CPU torch, runtime only).
+
+Similar-photo images load from the original Reddit URLs, because the full image set (30 GB) is not in the repo.
+
+### Optional: separate API and static frontend
+
+`web/` (plain HTML, CSS, JS) and `src/api/main.py` (FastAPI, with upload validation and a demo mode via `DEMO_MODE=1`)
+are a second way to run the scorer. They are not deployed. Run them locally:
+
+```bash
+python -m uvicorn src.api.main:app --port 8000
+cd web && python -m http.server 8080
+```
+
+The `Dockerfile` and `requirements-api.txt` are there if you later want to host the API on a Docker host.
 
 ---
 
