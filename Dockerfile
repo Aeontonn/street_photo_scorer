@@ -1,4 +1,4 @@
-# Hugging Face Space (Docker SDK) for the scoring API. Listens on port 7860.
+# Container for the scoring API (Google Cloud Run). Listens on port 7860.
 FROM python:3.12-slim
 
 RUN useradd -m -u 1000 user

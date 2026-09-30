@@ -268,12 +268,14 @@ def _thumbs() -> zipfile.ZipFile | None:
     return zipfile.ZipFile(THUMBS_ZIP) if THUMBS_ZIP.exists() else None
 
 
-def load_thumb(row: pd.Series) -> Image.Image:
-    """Training photo for a dataset row: from the deploy bundle's thumbs.zip, else the original file."""
+def load_thumb(row: pd.Series) -> Image.Image | str:
+    """Training photo for a dataset row: thumbs.zip, else the local file, else the original Reddit URL."""
     z = _thumbs()
     if z is not None:
         return Image.open(io.BytesIO(z.read(f"{row['id']}.jpg")))
-    return Image.open(row["local_path"])
+    if Path(row["local_path"]).exists():
+        return Image.open(row["local_path"])
+    return row["url"]  # st.image can load a URL directly
 
 
 @lru_cache(maxsize=1)

@@ -18,4 +18,5 @@ def test_score_and_thumbnails():
     r = scorer.run_pipeline(img, scorer.load_resources())
     df = scorer.load_resources().df
     assert len(r["similar_indices"]) > 0
-    assert scorer.load_thumb(df.iloc[r["similar_indices"][0]]).size[0] > 0
+    thumb = scorer.load_thumb(df.iloc[r["similar_indices"][0]])
+    assert isinstance(thumb, str) or thumb.size[0] > 0  # URL fallback when no thumbs.zip
