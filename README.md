@@ -1,4 +1,59 @@
+---
+title: Street Photo Scorer
+emoji: 📷
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Street Photo Scorer
+
+![Screenshot placeholder](docs/screenshot.png)
+<!-- Add a screenshot of the site at docs/screenshot.png -->
+
+Live site: _add your Vercel URL here_ | API: _add your Hugging Face Space URL here_
+
+## Website (web/ + API)
+
+Drop in a street photo and get a 0 to 10 score, a quality verdict, visual traits and a genre match.
+
+```
+web/   Static frontend (HTML, CSS, JS). Hosted on Vercel.
+src/   Python ML code and the FastAPI service (src/api/main.py). Hosted on a Hugging Face Space (Docker).
+```
+
+### Run locally
+
+```bash
+# 1. Backend. Needs the model files in deploy_bundle/ (see "Model files" below).
+pip install -r requirements-api.txt
+ARTIFACTS_DIR=deploy_bundle python -m uvicorn src.api.main:app --port 8000
+
+# No model files or torch? Run with clearly labelled fake scores instead:
+DEMO_MODE=1 python -m uvicorn src.api.main:app --port 8000
+
+# 2. Frontend (second terminal). web/config.js already points at http://localhost:8000
+cd web
+python -m http.server 8080
+```
+
+Open http://localhost:8080. The API docs are at http://localhost:8000/docs.
+
+Uploads are limited to JPG, PNG or WebP up to 10 MB. Large photos are resized to 1200 px on the long side before scoring.
+If the real model cannot load, the API switches to demo mode on its own and `/health` reports `"model": "demo"`.
+
+### Model files
+
+The API needs `models/` (about 120 KB) and `processed/` (about 50 MB) from the trained pipeline.
+`tools/build_deploy_assets.py` builds them, and they are git-ignored. CLIP (about 600 MB) is downloaded from Hugging Face automatically.
+
+### How it is deployed
+
+- **Backend:** Hugging Face Space with the Docker SDK, using the root `Dockerfile` and `requirements-api.txt`. Model files are uploaded to the Space under `data/`.
+- **Frontend:** Vercel, with the project root set to `web/`. Set your Space URL in `web/config.js`.
+- **CORS:** set `ALLOWED_ORIGINS` in the Space settings to your Vercel URL.
+
+---
 
 > Upload a street photo — get an aesthetic score, a technical breakdown, and see where your photo fits among 22,000+ real community-rated shots.
 

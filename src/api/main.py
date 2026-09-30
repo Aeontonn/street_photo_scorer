@@ -9,27 +9,36 @@ Run locally with:
 
 from __future__ import annotations
 
+import hashlib
 import io
+import logging
 import os
+import random
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
-from src.scoring.scorer import load_resources, score_image
-
 load_dotenv()
+
+log = logging.getLogger("uvicorn.error")
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
+
+# DEMO_MODE=1 skips the real model (no torch, no artifacts needed) so the frontend can be developed.
+# If the real model fails to load, the API falls back to demo mode on its own.
+demo_mode = os.environ.get("DEMO_MODE") == "1"
 
 # Comma-separated list of allowed frontend origins, e.g.
 #   ALLOWED_ORIGINS=https://scorer.example.com,https://www.scorer.example.com
 # Falls back to the React dev server's default ports (Vite/CRA) if unset.
-_default_origins = "http://localhost:3000,http://localhost:5173"
 ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.environ.get("ALLOWED_ORIGINS", _default_origins).split(",")
+    for origin in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173,http://localhost:8080").split(",")
     if origin.strip()
 ]
 
@@ -38,7 +47,14 @@ ALLOWED_ORIGINS = [
 async def lifespan(app: FastAPI):
     # Load CLIP + the trained models once at startup instead of on the first
     # request, so the first real user isn't the one paying the load cost.
-    await run_in_threadpool(load_resources)
+    global demo_mode
+    if not demo_mode:
+        try:
+            from src.scoring.scorer import load_resources
+            await run_in_threadpool(load_resources)
+        except Exception as exc:
+            log.warning("Could not load the real model, serving DEMO scores: %s", exc)
+            demo_mode = True
     yield
 
 
@@ -58,24 +74,72 @@ app.add_middleware(
 
 
 def _load_image(data: bytes, filename: str) -> Image.Image:
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="That image is over 10 MB. Please upload a smaller one.")
     try:
-        return Image.open(io.BytesIO(data))
-    except UnidentifiedImageError:
-        raise HTTPException(status_code=400, detail=f"Could not read '{filename}' as an image")
+        image = Image.open(io.BytesIO(data))
+        if image.format not in ALLOWED_FORMATS:
+            raise ValueError(image.format)
+        image.load()  # decode now so a corrupt file fails here, not inside the model
+        return image
+    except Exception:
+        raise HTTPException(status_code=400, detail="Please upload a JPG, PNG or WebP image.")
+
+
+def _demo_result(data: bytes) -> dict:
+    """Fake but deterministic result (same image gives the same score). Clearly labelled via demo=True."""
+    rng = random.Random(hashlib.sha256(data).hexdigest())
+    percentile = round(rng.uniform(5, 95), 1)
+    label = ("Low match", "Below average", "Above average", "Strong", "Exceptional")[
+        sum(percentile >= t for t in (25, 50, 75, 90))
+    ]
+    return {
+        "demo": True,
+        "aesthetic_score": round(percentile / 10, 1),
+        "percentile": percentile,
+        "score_label": label,
+        "quality_verdict": "high" if percentile >= 50 else "low",
+        "confidence": round(rng.uniform(0.5, 0.9), 3),
+        "cluster_id": 3,
+        "cluster_name": "B&W Classics",
+        "attributes": [
+            {"label": "Black & white", "similarity": 0.284},
+            {"label": "People present", "similarity": 0.251},
+            {"label": "High contrast", "similarity": 0.233},
+        ],
+        "genre_scores": [
+            {"label": "Candid / decisive moment", "score": 0.41},
+            {"label": "Fine art B&W", "score": 0.27},
+            {"label": "Documentary", "score": 0.14},
+        ],
+    }
+
+
+async def _score_one(data: bytes, filename: str) -> dict:
+    image = _load_image(data, filename)
+    if demo_mode:
+        return {"filename": filename, **_demo_result(data)}
+    from src.scoring.scorer import score_image
+    result = await run_in_threadpool(score_image, image)
+    return {"filename": filename, "demo": False, **result}
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "model": "demo" if demo_mode else "real"}
 
 
 @app.post("/score")
 async def score(file: UploadFile = File(...)):
-    """Score a single uploaded image."""
-    data = await file.read()
-    image = _load_image(data, file.filename)
-    result = await run_in_threadpool(score_image, image)
-    return {"filename": file.filename, **result}
+    """Score a single uploaded image (JPG, PNG or WebP, max 10 MB)."""
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    try:
+        return await _score_one(data, file.filename)
+    except HTTPException:
+        raise
+    except Exception:
+        log.exception("Scoring failed")
+        raise HTTPException(status_code=500, detail="Something went wrong while scoring. Please try another photo.")
 
 
 @app.post("/score-batch")
@@ -84,11 +148,9 @@ async def score_batch(files: list[UploadFile] = File(...)):
     scored, failed = [], []
 
     for f in files:
-        data = await f.read()
+        data = await f.read(MAX_UPLOAD_BYTES + 1)
         try:
-            image = _load_image(data, f.filename)
-            result = await run_in_threadpool(score_image, image)
-            scored.append({"filename": f.filename, **result})
+            scored.append(await _score_one(data, f.filename))
         except HTTPException as exc:
             failed.append({"filename": f.filename, "error": exc.detail})
         except Exception as exc:

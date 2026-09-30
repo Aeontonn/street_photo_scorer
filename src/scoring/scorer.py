@@ -10,6 +10,9 @@ by both the Streamlit app (src/app/shared.py) and the FastAPI service
 from __future__ import annotations
 
 import gc
+import io
+import os
+import zipfile
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -24,8 +27,10 @@ from transformers import CLIPModel, CLIPProcessor
 
 from src.analysis.photo_analysis import safe_analyze
 
-MODELS_DIR    = Path("data/models")
-PROCESSED_DIR = Path("data/processed")
+ARTIFACTS_DIR = Path(os.environ.get("ARTIFACTS_DIR", "data"))
+MODELS_DIR    = ARTIFACTS_DIR / "models"
+PROCESSED_DIR = ARTIFACTS_DIR / "processed"
+THUMBS_ZIP    = ARTIFACTS_DIR / "thumbs.zip"
 MODEL_NAME    = "openai/clip-vit-base-patch32"
 
 CLUSTER_NAMES: dict[int, str] = {
@@ -256,6 +261,19 @@ class Resources:
     df: pd.DataFrame
     umap_3d: np.ndarray
     cluster_centroids: np.ndarray
+
+
+@lru_cache(maxsize=1)
+def _thumbs() -> zipfile.ZipFile | None:
+    return zipfile.ZipFile(THUMBS_ZIP) if THUMBS_ZIP.exists() else None
+
+
+def load_thumb(row: pd.Series) -> Image.Image:
+    """Training photo for a dataset row: from the deploy bundle's thumbs.zip, else the original file."""
+    z = _thumbs()
+    if z is not None:
+        return Image.open(io.BytesIO(z.read(f"{row['id']}.jpg")))
+    return Image.open(row["local_path"])
 
 
 @lru_cache(maxsize=1)

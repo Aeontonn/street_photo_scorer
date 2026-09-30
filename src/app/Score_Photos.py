@@ -12,6 +12,7 @@ import streamlit as st
 from PIL import Image, ImageOps
 from scipy import stats
 
+from src.scoring.scorer import load_thumb
 from src.app.shared import (
     ATTRIBUTE_IMPACT, CLUSTER_DESCRIPTIONS, CLUSTER_NAMES, TAG_COLORS,
     _analyse_image_clip, _cluster_attrs, _dominant_colors, _score_image,
@@ -392,7 +393,7 @@ with tab1:
     for col, (_, ex_row) in zip(ex_cols, cluster_examples.iterrows()):
         with col:
             try:
-                col.image(Image.open(ex_row["local_path"]), use_container_width=True)
+                col.image(load_thumb(ex_row), use_container_width=True)
                 col.caption(f"{int(ex_row['score'])} upvotes")
             except Exception:
                 col.caption("Image unavailable")
@@ -413,7 +414,7 @@ with tab2:
         row = df.iloc[idx]
         with cols[i % 3]:
             try:
-                st.image(Image.open(row["local_path"]), use_container_width=True)
+                st.image(load_thumb(row), use_container_width=True)
                 sim_pct = float(stats.percentileofscore(training_preds, training_preds[idx]))
                 title   = str(row.get("title", ""))[:55]
                 if title:

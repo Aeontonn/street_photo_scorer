@@ -16,3 +16,5 @@ font                = "sans serif"
 # primaryColor             = "#d4a843"
 # font                = "sans serif"
 # 
+[server]
+maxUploadSize = 10
